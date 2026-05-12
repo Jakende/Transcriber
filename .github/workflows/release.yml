@@ -55,11 +55,22 @@ jobs:
         shell: cmd
         run: build_windows_exe.bat
 
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        working-directory: "Transcription Windows"
+        shell: cmd
+        run: build_windows_installer.bat
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: Transcription-Windows
-          path: "Transcription Windows/dist/Transcription Windows.exe"
+          path: |
+            Transcription Windows/dist/Transcription Windows.exe
+            Transcription Windows/dist/Transcription-Windows-Setup-v1.0.exe
 
   release:
     name: Publish GitHub Release
@@ -84,6 +95,7 @@ jobs:
 
             Assets:
             - macOS SwiftUI app bundle (`Transcription-macOS-v1.0.zip`)
+            - Windows setup wizard (`Transcription-Windows-Setup-v1.0.exe`)
             - Windows standalone executable (`Transcription Windows.exe`) with torch, openai-whisper, and ffmpeg bundled
 
             Notes:
@@ -91,4 +103,5 @@ jobs:
             - The Windows EXE includes FFmpeg from gyan.dev; review FFmpeg licensing terms before redistribution.
           files: |
             release-assets/Transcription-macOS/Transcription-macOS-v1.0.zip
+            release-assets/Transcription-Windows/Transcription-Windows-Setup-v1.0.exe
             release-assets/Transcription-Windows/Transcription Windows.exe

@@ -10,7 +10,7 @@ Windows-optimierte Desktop-App fuer lokale Audio- und Video-Transkription mit Op
 
 ## Installation
 
-Fuer normale Nutzer: die fertige `Transcription Windows.exe` aus dem GitHub-Build/Release herunterladen und starten. Diese EXE enthaelt `torch`, `openai-whisper` und `ffmpeg.exe`.
+Fuer normale Nutzer: den fertigen Setup Wizard `Transcription-Windows-Setup-v1.0.exe` aus dem GitHub-Release herunterladen und ausfuehren. Der Installer richtet die App im Startmenue ein und kann optional eine Desktop-Verknuepfung anlegen.
 
 Fuer lokale Entwicklung:
 
@@ -51,16 +51,23 @@ python scripts\generate_windows_icon.py assets\AppIcon.ico
 
 ## EXE bauen
 
-Der Build erstellt bei Bedarf eine lokale `.venv`, installiert `torch`, `openai-whisper` und PyInstaller aus `requirements.txt`, erzeugt das Icon, laedt FFmpeg und buendelt die Python-Abhaengigkeiten plus `ffmpeg.exe` in die `.exe`:
+Der EXE-Build erstellt bei Bedarf eine lokale `.venv`, installiert `torch`, `openai-whisper` und PyInstaller aus `requirements.txt`, erzeugt das Icon, laedt FFmpeg und buendelt die Python-Abhaengigkeiten plus `ffmpeg.exe` in die `.exe`:
 
 ```bat
 build_windows_exe.bat
 ```
 
-Die Datei liegt danach unter:
+Der Installer-Build verwendet danach Inno Setup:
+
+```bat
+build_windows_installer.bat
+```
+
+Die Dateien liegen danach unter:
 
 ```text
 dist\Transcription Windows.exe
+dist\Transcription-Windows-Setup-v1.0.exe
 ```
 
 ## Hinweise

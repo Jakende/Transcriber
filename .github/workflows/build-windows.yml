@@ -27,8 +27,23 @@ jobs:
         shell: cmd
         run: build_windows_exe.bat
 
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        working-directory: "Transcription Windows"
+        shell: cmd
+        run: build_windows_installer.bat
+
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: Transcription-Windows-exe
           path: "Transcription Windows/dist/Transcription Windows.exe"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Transcription-Windows-Setup
+          path: "Transcription Windows/dist/Transcription-Windows-Setup-v1.0.exe"
