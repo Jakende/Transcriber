@@ -12,6 +12,21 @@ from pathlib import Path
 from tkinter import BOTH, END, LEFT, RIGHT, X, BooleanVar, IntVar, StringVar, Text, Tk, filedialog, messagebox
 from tkinter import ttk
 
+
+class SafeNullWriter:
+    def write(self, text: str) -> int:
+        return len(text or "")
+
+    def flush(self) -> None:
+        pass
+
+
+if sys.stdout is None:
+    sys.stdout = SafeNullWriter()
+if sys.stderr is None:
+    sys.stderr = SafeNullWriter()
+
+
 try:
     import torch
     import whisper
@@ -52,6 +67,19 @@ def configure_bundled_ffmpeg() -> Path | None:
 BUNDLED_FFMPEG = configure_bundled_ffmpeg()
 
 
+def app_data_dir() -> Path:
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(Path.home())
+    path = Path(base) / APP_TITLE
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def whisper_model_cache_dir() -> Path:
+    path = app_data_dir() / "models"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def seconds_to_timecode(seconds: float, fps: int = FPS) -> str:
     total_frames = int(round(max(0.0, seconds) * fps))
     frames_per_hour = 3600 * fps
@@ -90,7 +118,7 @@ def pick_preferred_device() -> str:
 def load_whisper_model_robust(model_name: str, preferred_device: str) -> tuple[torch.nn.Module, str]:
     if torch is None or whisper is None:
         raise RuntimeError("Python packages 'torch' and 'openai-whisper' are required.")
-    model = whisper.load_model(model_name, device="cpu")
+    model = whisper.load_model(model_name, device="cpu", download_root=str(whisper_model_cache_dir()))
     densify_sparse_buffers(model)
     if preferred_device == "cuda":
         try:
@@ -356,6 +384,8 @@ class TranscriptionApp:
                 )
             preferred_device = pick_preferred_device()
             self._queue_log(f"Loading model '{model_name}' on preferred device '{preferred_device}' ...", "info")
+            self._queue_log(f"Model cache: {whisper_model_cache_dir()}", "info")
+            self._queue_log("If this model is not cached yet, the first download can take several minutes.", "info")
             model, device = load_whisper_model_robust(model_name, preferred_device)
             self._queue_log(f"Model loaded. Using device '{device}'.", "success")
             if device == "cpu":

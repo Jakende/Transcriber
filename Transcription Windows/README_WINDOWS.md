@@ -76,4 +76,5 @@ dist\Transcription-Windows-Setup-v1.0.exe
 - Ohne CUDA laeuft die App auf CPU.
 - Die gebaute `.exe` enthaelt `torch` und `openai-whisper`; Nutzer muessen diese Pakete fuer die EXE nicht separat installieren.
 - Die gebaute `.exe` enthaelt auch `ffmpeg.exe`; Nutzer muessen FFmpeg fuer die EXE nicht separat installieren.
+- Whisper-Modelle werden beim ersten Start je nach Modellgroesse in `%LOCALAPPDATA%\Transcription Windows\models` heruntergeladen und danach wiederverwendet.
 - FFmpeg Windows builds are downloaded from gyan.dev during the build. Review the FFmpeg/GPL licensing terms before distributing release binaries.
