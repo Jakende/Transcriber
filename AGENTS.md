@@ -7,7 +7,6 @@ This repository contains local transcription utilities organized by platform.
 - `Transcription macOS/`: macOS workflows, `.command` launchers, and shell wrappers.
 - `Transcription macOS App/`: SwiftPM/SwiftUI macOS app and Python transcription helper.
 - `Transcription Windows/`: Windows 10+ Tkinter app, batch helpers, and Windows docs.
-- `yt_transcript_md.py`: platform-neutral YouTube subtitle-to-Markdown utility.
 - `README.md`: repository overview and platform entry points.
 
 Generated files such as `__pycache__/`, `.DS_Store`, `dist/`, and build folders should not be treated as source.
@@ -71,4 +70,4 @@ Pull requests should include a short description, affected platform folder, manu
 
 ## Agent-Specific Instructions
 
-Keep `Transcription macOS/`, `Transcription macOS App/`, and `Transcription Windows/` workflows independent unless the user asks to synchronize behavior. Do not re-add `Transcription Windows/yt_transcript_md.py`; it was intentionally excluded from the Windows project.
+Keep `Transcription macOS/`, `Transcription macOS App/`, and `Transcription Windows/` workflows independent unless the user asks to synchronize behavior.

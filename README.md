@@ -7,7 +7,6 @@ Local transcription workflows using OpenAI Whisper, organized by platform.
 - `Transcription macOS/`: macOS-oriented Apple workflows with `.command` launchers and shell wrappers.
 - `Transcription macOS App/`: native SwiftUI macOS app wrapping the same Whisper workflow.
 - `Transcription Windows/`: Windows 10+ Tkinter desktop app, batch installers, and PyInstaller build helper.
-- `yt_transcript_md.py`: platform-neutral YouTube subtitle-to-Markdown utility.
 - `AGENTS.md`: contributor and agent guidelines.
 
 ## Quick Start
