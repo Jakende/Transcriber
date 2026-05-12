@@ -6,10 +6,13 @@ Windows-optimierte Desktop-App fuer lokale Audio- und Video-Transkription mit Op
 
 - Windows 10 oder neuer
 - Python 3.10 oder neuer
-- ffmpeg auf `PATH`
 - Internet beim ersten Modell-Download
 
 ## Installation
+
+Fuer normale Nutzer: die fertige `Transcription Windows.exe` aus dem GitHub-Build/Release herunterladen und starten. Diese EXE enthaelt `torch`, `openai-whisper` und `ffmpeg.exe`.
+
+Fuer lokale Entwicklung:
 
 1. `install_windows.bat` doppelklicken.
 2. Danach `run_windows_app.bat` doppelklicken.
@@ -48,7 +51,7 @@ python scripts\generate_windows_icon.py assets\AppIcon.ico
 
 ## EXE bauen
 
-Der Build erstellt bei Bedarf eine lokale `.venv`, installiert `torch`, `openai-whisper` und PyInstaller aus `requirements.txt`, erzeugt das Icon und buendelt die Python-Abhaengigkeiten in die `.exe`:
+Der Build erstellt bei Bedarf eine lokale `.venv`, installiert `torch`, `openai-whisper` und PyInstaller aus `requirements.txt`, erzeugt das Icon, laedt FFmpeg und buendelt die Python-Abhaengigkeiten plus `ffmpeg.exe` in die `.exe`:
 
 ```bat
 build_windows_exe.bat
@@ -64,5 +67,6 @@ dist\Transcription Windows.exe
 
 - CUDA wird auf Windows automatisch genutzt, wenn eine kompatible NVIDIA-GPU und passende Torch-Installation vorhanden sind.
 - Ohne CUDA laeuft die App auf CPU.
-- Falls ffmpeg fehlt, kann Whisper Audio- oder Videodateien nicht decodieren.
 - Die gebaute `.exe` enthaelt `torch` und `openai-whisper`; Nutzer muessen diese Pakete fuer die EXE nicht separat installieren.
+- Die gebaute `.exe` enthaelt auch `ffmpeg.exe`; Nutzer muessen FFmpeg fuer die EXE nicht separat installieren.
+- FFmpeg Windows builds are downloaded from gyan.dev during the build. Review the FFmpeg/GPL licensing terms before distributing release binaries.

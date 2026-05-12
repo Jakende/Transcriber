@@ -8,3 +8,5 @@ build/
 *.spec
 .build/
 Package.resolved
+Transcription Windows/.cache/
+Transcription Windows/vendor/

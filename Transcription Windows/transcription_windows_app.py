@@ -35,6 +35,23 @@ SUPPORTED_FILETYPES = [
 ]
 
 
+def bundled_resource_path(name: str) -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS) / name
+    return Path(__file__).resolve().parent / name
+
+
+def configure_bundled_ffmpeg() -> Path | None:
+    ffmpeg_exe = bundled_resource_path("ffmpeg.exe")
+    if ffmpeg_exe.exists():
+        os.environ["PATH"] = f"{ffmpeg_exe.parent}{os.pathsep}{os.environ.get('PATH', '')}"
+        return ffmpeg_exe
+    return None
+
+
+BUNDLED_FFMPEG = configure_bundled_ffmpeg()
+
+
 def seconds_to_timecode(seconds: float, fps: int = FPS) -> str:
     total_frames = int(round(max(0.0, seconds) * fps))
     frames_per_hour = 3600 * fps
@@ -278,6 +295,10 @@ class TranscriptionApp:
             )
         if shutil.which("ffmpeg") is None:
             self._log("WARNUNG: ffmpeg wurde nicht auf PATH gefunden. Medien-Decoding kann fehlschlagen.")
+        elif BUNDLED_FFMPEG is not None:
+            self._log(f"Gebuendeltes ffmpeg aktiv: {BUNDLED_FFMPEG}")
+        else:
+            self._log(f"System-ffmpeg aktiv: {shutil.which('ffmpeg')}")
         self._log(f"Device-Erkennung: bevorzugt '{pick_preferred_device()}'.")
 
     def _toggle_output_picker(self) -> None:

@@ -17,12 +17,16 @@ if errorlevel 1 goto error
 python scripts\generate_windows_icon.py assets\AppIcon.ico
 if errorlevel 1 goto error
 
+python scripts\prepare_ffmpeg.py
+if errorlevel 1 goto error
+
 python -m PyInstaller ^
     --noconfirm ^
     --onefile ^
     --windowed ^
     --icon assets\AppIcon.ico ^
     --name "Transcription Windows" ^
+    --add-binary "vendor\ffmpeg\ffmpeg.exe;." ^
     --hidden-import torch ^
     --hidden-import whisper ^
     --hidden-import tiktoken ^
@@ -37,12 +41,12 @@ echo Build complete:
 echo dist\Transcription Windows.exe
 echo.
 echo The executable bundles torch and openai-whisper from the build environment.
-echo ffmpeg still needs to be available on PATH for media decoding.
-pause
+echo The executable also bundles ffmpeg.exe for media decoding.
+if /i not "%CI%"=="true" pause
 exit /b 0
 
 :error
 echo.
 echo Build failed.
-pause
+if /i not "%CI%"=="true" pause
 exit /b 1

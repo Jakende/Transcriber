@@ -1,0 +1,34 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "Transcription Windows/**"
+      - ".github/workflows/build-windows.yml"
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build EXE
+        working-directory: "Transcription Windows"
+        shell: cmd
+        run: build_windows_exe.bat
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Transcription-Windows-exe
+          path: "Transcription Windows/dist/Transcription Windows.exe"
