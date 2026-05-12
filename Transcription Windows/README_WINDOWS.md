@@ -48,7 +48,7 @@ python scripts\generate_windows_icon.py assets\AppIcon.ico
 
 ## EXE bauen
 
-Nach der Installation:
+Der Build erstellt bei Bedarf eine lokale `.venv`, installiert `torch`, `openai-whisper` und PyInstaller aus `requirements.txt`, erzeugt das Icon und buendelt die Python-Abhaengigkeiten in die `.exe`:
 
 ```bat
 build_windows_exe.bat
@@ -65,3 +65,4 @@ dist\Transcription Windows.exe
 - CUDA wird auf Windows automatisch genutzt, wenn eine kompatible NVIDIA-GPU und passende Torch-Installation vorhanden sind.
 - Ohne CUDA laeuft die App auf CPU.
 - Falls ffmpeg fehlt, kann Whisper Audio- oder Videodateien nicht decodieren.
+- Die gebaute `.exe` enthaelt `torch` und `openai-whisper`; Nutzer muessen diese Pakete fuer die EXE nicht separat installieren.

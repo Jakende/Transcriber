@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import os
 import queue
 import shutil
+import sys
 import threading
 import time
 import traceback
@@ -9,8 +12,14 @@ from pathlib import Path
 from tkinter import BOTH, END, LEFT, RIGHT, X, BooleanVar, IntVar, StringVar, Tk, filedialog, messagebox
 from tkinter import ttk
 
-import torch
-import whisper
+try:
+    import torch
+    import whisper
+    DEPENDENCY_ERROR = None
+except ModuleNotFoundError as exc:
+    torch = None
+    whisper = None
+    DEPENDENCY_ERROR = exc
 
 
 APP_TITLE = "Transcription Windows"
@@ -46,6 +55,8 @@ def yaml_quote(value: str) -> str:
 
 
 def densify_sparse_buffers(module: torch.nn.Module) -> None:
+    if torch is None:
+        raise RuntimeError("Python package 'torch' is not installed.")
     for key, buf in list(module._buffers.items()):
         if torch.is_tensor(buf) and getattr(buf, "is_sparse", False):
             module._buffers[key] = buf.to_dense()
@@ -54,12 +65,16 @@ def densify_sparse_buffers(module: torch.nn.Module) -> None:
 
 
 def pick_preferred_device() -> str:
+    if torch is None:
+        return "cpu"
     if torch.cuda.is_available():
         return "cuda"
     return "cpu"
 
 
 def load_whisper_model_robust(model_name: str, preferred_device: str) -> tuple[torch.nn.Module, str]:
+    if torch is None or whisper is None:
+        raise RuntimeError("Python packages 'torch' and 'openai-whisper' are required.")
     model = whisper.load_model(model_name, device="cpu")
     densify_sparse_buffers(model)
 
@@ -250,6 +265,17 @@ class TranscriptionApp:
         status_bar.pack(fill=X, pady=(8, 0))
 
     def _check_environment(self) -> None:
+        if DEPENDENCY_ERROR is not None:
+            install_hint = (
+                "Die gebaute EXE enthaelt diese Pakete normalerweise. "
+                "Bitte build_windows_exe.bat erneut ausfuehren."
+                if getattr(sys, "frozen", False)
+                else "Bitte install_windows.bat ausfuehren oder pip install torch openai-whisper installieren."
+            )
+            self._log(
+                "FEHLENDE DEPENDENCY: "
+                f"{DEPENDENCY_ERROR}. {install_hint}"
+            )
         if shutil.which("ffmpeg") is None:
             self._log("WARNUNG: ffmpeg wurde nicht auf PATH gefunden. Medien-Decoding kann fehlschlagen.")
         self._log(f"Device-Erkennung: bevorzugt '{pick_preferred_device()}'.")
@@ -303,9 +329,20 @@ class TranscriptionApp:
         language = self.language.get().strip() or "de"
         buffer_seconds = max(0, int(self.buffer_seconds.get()))
         include_timecodes = self.include_timecodes.get()
-        preferred_device = pick_preferred_device()
 
         try:
+            if DEPENDENCY_ERROR is not None:
+                install_hint = (
+                    "Die gebaute EXE enthaelt diese Pakete normalerweise. "
+                    "Bitte build_windows_exe.bat erneut ausfuehren."
+                    if getattr(sys, "frozen", False)
+                    else "Bitte install_windows.bat ausfuehren oder pip install torch openai-whisper installieren."
+                )
+                raise RuntimeError(
+                    f"{DEPENDENCY_ERROR}. {install_hint}"
+                )
+
+            preferred_device = pick_preferred_device()
             self._queue_log(f"Lade Modell '{model_name}' auf bevorzugtem device '{preferred_device}' ...")
             model, device = load_whisper_model_robust(model_name, preferred_device)
             self._queue_log(f"Modell geladen. Verwendetes device: '{device}'.")
