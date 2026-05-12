@@ -34,6 +34,13 @@ install_windows.bat
 run_windows_app.bat
 ```
 
+## Releases
+
+GitHub tag `v1.0` builds and publishes a release through GitHub Actions:
+
+- `Transcription-macOS-v1.0.zip`
+- `Transcription Windows.exe`
+
 ## Output Format
 
 Generated Markdown is optimized for Obsidian and includes YAML front matter:
