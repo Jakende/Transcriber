@@ -1,0 +1,2 @@
+[actions.Run]
+command = "./Transcription macOS App/script/build_and_run.sh"
