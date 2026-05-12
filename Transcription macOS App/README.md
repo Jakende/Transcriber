@@ -11,6 +11,7 @@ Native macOS SwiftUI app for bulk audio and video transcription with OpenAI Whis
 - Set a buffer between files
 - Save Markdown next to source files or in a selected output folder
 - Write Obsidian-compatible YAML front matter
+- Include a custom black-and-white speaking smiley app icon
 
 ## Requirements
 

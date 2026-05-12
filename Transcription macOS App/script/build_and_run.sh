@@ -7,6 +7,8 @@ PRODUCT_NAME="TranscriptionMacOSApp"
 BUNDLE_DIR="${ROOT_DIR}/dist/${APP_NAME}.app"
 EXECUTABLE_PATH="${BUNDLE_DIR}/Contents/MacOS/${PRODUCT_NAME}"
 RESOURCES_DIR="${BUNDLE_DIR}/Contents/Resources"
+ICONSET_DIR="${ROOT_DIR}/dist/AppIcon.iconset"
+ICON_PATH="${RESOURCES_DIR}/AppIcon.icns"
 
 cd "${ROOT_DIR}"
 
@@ -20,6 +22,8 @@ mkdir -p "${BUNDLE_DIR}/Contents/MacOS" "${RESOURCES_DIR}"
 cp ".build/debug/${PRODUCT_NAME}" "${EXECUTABLE_PATH}"
 chmod +x "${EXECUTABLE_PATH}"
 cp "Sources/TranscriptionMacOSApp/Resources/transcribe_bulk.py" "${RESOURCES_DIR}/transcribe_bulk.py"
+python3 "${ROOT_DIR}/script/generate_app_icon.py" "${ICONSET_DIR}"
+iconutil -c icns "${ICONSET_DIR}" -o "${ICON_PATH}"
 
 cat > "${BUNDLE_DIR}/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -32,6 +36,8 @@ cat > "${BUNDLE_DIR}/Contents/Info.plist" <<PLIST
   <string>de.jakende.transcription-macos</string>
   <key>CFBundleName</key>
   <string>${APP_NAME}</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>LSMinimumSystemVersion</key>
