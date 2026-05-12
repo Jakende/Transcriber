@@ -121,9 +121,9 @@ def main() -> int:
     output_dir = Path(args.output_dir).resolve() if args.output_dir else None
 
     preferred = pick_preferred_device()
-    print(f"Lade Modell ({args.model}) mit bevorzugtem device='{preferred}' ...", flush=True)
+    print(f"Loading model '{args.model}' with preferred device '{preferred}' ...", flush=True)
     model, device = load_whisper_model_robust(args.model, preferred)
-    print(f"Modell geladen. Verwendetes device='{device}'", flush=True)
+    print(f"Model loaded. Using device '{device}'.", flush=True)
 
     if device == "cpu":
         try:
@@ -132,7 +132,7 @@ def main() -> int:
             pass
 
     for index, media_path in enumerate(files, start=1):
-        print(f"Transkription {index}/{len(files)}: {media_path.name}", flush=True)
+        print(f"Transcribing {index}/{len(files)}: {media_path.name}", flush=True)
         result = model.transcribe(
             str(media_path),
             language=args.language,
@@ -147,10 +147,10 @@ def main() -> int:
         target_dir = output_dir or media_path.parent
         target_dir.mkdir(parents=True, exist_ok=True)
         output_path = write_markdown(media_path, target_dir, args.model, device, args.timecodes, result)
-        print(f"Gespeichert: {output_path}", flush=True)
+        print(f"Saved: {output_path}", flush=True)
 
         if index < len(files) and args.buffer > 0:
-            print(f"Warte {args.buffer} Sekunden vor der naechsten Datei ...", flush=True)
+            print(f"Waiting {args.buffer} seconds before the next file ...", flush=True)
             time.sleep(args.buffer)
 
     return 0

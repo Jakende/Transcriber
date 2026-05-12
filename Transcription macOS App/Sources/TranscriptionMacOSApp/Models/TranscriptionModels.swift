@@ -29,3 +29,16 @@ struct TranscriptionSettings {
     var bufferSeconds: Int
     var outputFolder: URL?
 }
+
+struct LogEntry: Identifiable, Equatable {
+    enum Kind {
+        case info
+        case success
+        case error
+    }
+
+    let id = UUID()
+    let timestamp: Date
+    let message: String
+    let kind: Kind
+}
