@@ -38,6 +38,14 @@ Pro Quelldatei entsteht eine Markdown-Datei mit:
 - `timecodes`
 - optional timecodierten Segmenten
 
+## App Icon
+
+The Windows build uses `assets\AppIcon.ico`, generated from the same black-and-white speaking smiley icon style as the macOS app:
+
+```bat
+python scripts\generate_windows_icon.py assets\AppIcon.ico
+```
+
 ## EXE bauen
 
 Nach der Installation:

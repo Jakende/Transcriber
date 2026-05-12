@@ -6,7 +6,10 @@ if exist ".venv\Scripts\activate.bat" (
     call .venv\Scripts\activate.bat
 )
 
-python -m PyInstaller --noconfirm --onefile --windowed --name "Transcription Windows" transcription_windows_app.py
+python scripts\generate_windows_icon.py assets\AppIcon.ico
+if errorlevel 1 goto error
+
+python -m PyInstaller --noconfirm --onefile --windowed --icon assets\AppIcon.ico --name "Transcription Windows" transcription_windows_app.py
 if errorlevel 1 goto error
 
 echo.
