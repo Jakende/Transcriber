@@ -17,7 +17,7 @@ permissions:
 jobs:
   build-macos:
     name: Build macOS App
-    runs-on: macos-latest
+    runs-on: macos-15-arm
 
     steps:
       - name: Check out repository
@@ -25,17 +25,23 @@ jobs:
 
       - name: Build app bundle
         working-directory: "Transcription macOS App"
-        run: ./script/build_and_run.sh --no-run
+        run: ./script/build_and_run.sh --bundle --no-run
 
       - name: Package app bundle
         working-directory: "Transcription macOS App/dist"
-        run: ditto -c -k --keepParent "Transcription macOS.app" "Transcription-macOS-v1.0.zip"
+        run: |
+          ditto -c -k --keepParent "Transcription macOS.app" "Transcription-macOS-v2.0.zip"
+          shasum -a 256 "Transcription-macOS-v2.0.zip" > "Transcription-macOS-v2.0.zip.sha256"
+          split -b 1900m "Transcription-macOS-v2.0.zip" "Transcription-macOS-v2.0.zip.part-"
+          rm "Transcription-macOS-v2.0.zip"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: Transcription-macOS
-          path: "Transcription macOS App/dist/Transcription-macOS-v1.0.zip"
+          path: |
+            Transcription macOS App/dist/Transcription-macOS-v2.0.zip.part-*
+            Transcription macOS App/dist/Transcription-macOS-v2.0.zip.sha256
 
   build-windows:
     name: Build Windows EXE
@@ -94,14 +100,16 @@ jobs:
             Initial release of Transcriber.
 
             Assets:
-            - macOS SwiftUI app bundle (`Transcription-macOS-v1.0.zip`)
+            - macOS SwiftUI app bundle (`Transcription-macOS-v2.0.zip.part-*`)
             - Windows setup wizard (`Transcription-Windows-Setup-v1.0.exe`)
             - Windows standalone executable (`Transcription Windows.exe`) with torch, openai-whisper, and ffmpeg bundled
 
             Notes:
-            - The macOS app requires a local Python environment with `torch` and `openai-whisper`.
+            - The Apple-Silicon macOS app contains its Python runtime, ffmpeg, whisper.cpp, speaker models, language models, and Whisper Small/Medium/Turbo weights for offline use.
+            - Reassemble the macOS archive with `cat Transcription-macOS-v2.0.zip.part-* > Transcription-macOS-v2.0.zip`, then verify it with the supplied SHA-256 file.
             - The Windows EXE includes FFmpeg from gyan.dev; review FFmpeg licensing terms before redistribution.
           files: |
-            release-assets/Transcription-macOS/Transcription-macOS-v1.0.zip
+            release-assets/Transcription-macOS/Transcription-macOS-v2.0.zip.part-*
+            release-assets/Transcription-macOS/Transcription-macOS-v2.0.zip.sha256
             release-assets/Transcription-Windows/Transcription-Windows-Setup-v1.0.exe
             release-assets/Transcription-Windows/Transcription Windows.exe

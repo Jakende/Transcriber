@@ -1,0 +1,11 @@
+Transcription Toolkit
+
+The speaker-diarization design in the macOS application includes adapted code
+from LocalTranscript:
+
+Copyright (c) 2025-2026 BIAS.City
+Licensed under the MIT License.
+https://github.com/BenPohlBasel/LocalTranscript
+
+This distribution also contains third-party runtimes, libraries, executables,
+and model weights. See THIRD-PARTY-LICENSES.md for sources and license links.
