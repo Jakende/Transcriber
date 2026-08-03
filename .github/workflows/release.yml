@@ -1,5 +1,8 @@
 name: Release
 
+env:
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
 on:
   push:
     tags:
@@ -9,7 +12,7 @@ on:
       tag:
         description: "Release tag, for example v1.0"
         required: true
-        default: "v1.0"
+        default: "v2.0"
 
 permissions:
   contents: write
@@ -17,7 +20,7 @@ permissions:
 jobs:
   build-macos:
     name: Build macOS App
-    runs-on: macos-15-arm
+    runs-on: macos-15
 
     steps:
       - name: Check out repository
@@ -30,18 +33,19 @@ jobs:
       - name: Package app bundle
         working-directory: "Transcription macOS App/dist"
         run: |
-          ditto -c -k --keepParent "Transcription macOS.app" "Transcription-macOS-v2.0.zip"
-          shasum -a 256 "Transcription-macOS-v2.0.zip" > "Transcription-macOS-v2.0.zip.sha256"
-          split -b 1900m "Transcription-macOS-v2.0.zip" "Transcription-macOS-v2.0.zip.part-"
-          rm "Transcription-macOS-v2.0.zip"
+          archive="Transcription-macOS-${RELEASE_TAG}.zip"
+          ditto -c -k --keepParent "Transcription macOS.app" "${archive}"
+          shasum -a 256 "${archive}" > "${archive}.sha256"
+          split -b 1900m "${archive}" "${archive}.part-"
+          rm "${archive}"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: Transcription-macOS
           path: |
-            Transcription macOS App/dist/Transcription-macOS-v2.0.zip.part-*
-            Transcription macOS App/dist/Transcription-macOS-v2.0.zip.sha256
+            Transcription macOS App/dist/Transcription-macOS-${{ env.RELEASE_TAG }}.zip.part-*
+            Transcription macOS App/dist/Transcription-macOS-${{ env.RELEASE_TAG }}.zip.sha256
 
   build-windows:
     name: Build Windows EXE
@@ -95,21 +99,22 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: Transcriber 1.0
+          target_commitish: ${{ github.sha }}
+          name: Transcriber ${{ env.RELEASE_TAG }}
           body: |
-            Initial release of Transcriber.
+            Transcriber ${{ env.RELEASE_TAG }}.
 
             Assets:
-            - macOS SwiftUI app bundle (`Transcription-macOS-v2.0.zip.part-*`)
+            - macOS SwiftUI app bundle (`Transcription-macOS-${{ env.RELEASE_TAG }}.zip.part-*`)
             - Windows setup wizard (`Transcription-Windows-Setup-v1.0.exe`)
             - Windows standalone executable (`Transcription Windows.exe`) with torch, openai-whisper, and ffmpeg bundled
 
             Notes:
             - The Apple-Silicon macOS app contains its Python runtime, ffmpeg, whisper.cpp, speaker models, language models, and Whisper Small/Medium/Turbo weights for offline use.
-            - Reassemble the macOS archive with `cat Transcription-macOS-v2.0.zip.part-* > Transcription-macOS-v2.0.zip`, then verify it with the supplied SHA-256 file.
+            - Reassemble the macOS archive with `cat Transcription-macOS-${{ env.RELEASE_TAG }}.zip.part-* > Transcription-macOS-${{ env.RELEASE_TAG }}.zip`, then verify it with the supplied SHA-256 file.
             - The Windows EXE includes FFmpeg from gyan.dev; review FFmpeg licensing terms before redistribution.
           files: |
-            release-assets/Transcription-macOS/Transcription-macOS-v2.0.zip.part-*
-            release-assets/Transcription-macOS/Transcription-macOS-v2.0.zip.sha256
+            release-assets/Transcription-macOS/Transcription-macOS-${{ env.RELEASE_TAG }}.zip.part-*
+            release-assets/Transcription-macOS/Transcription-macOS-${{ env.RELEASE_TAG }}.zip.sha256
             release-assets/Transcription-Windows/Transcription-Windows-Setup-v1.0.exe
             release-assets/Transcription-Windows/Transcription Windows.exe
