@@ -36,10 +36,16 @@ run_windows_app.bat
 
 ## Releases
 
-GitHub tag `v1.0` builds and publishes a release through GitHub Actions:
+Ein GitHub-Tag wie `v2.0` baut und veröffentlicht eine Release über GitHub Actions:
 
-- `Transcription-macOS-v1.0.zip`
+- `Transcription-macOS-v2.0.zip.part-*` und zugehörige SHA-256-Datei
 - `Transcription Windows.exe`
+
+Die macOS-Archivteile werden vor dem Entpacken zusammengefügt:
+
+```bash
+cat Transcription-macOS-v2.0.zip.part-* > Transcription-macOS-v2.0.zip
+```
 
 ## Output Format
 
