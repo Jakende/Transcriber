@@ -7,6 +7,7 @@ dist/
 build/
 *.spec
 .build/
+.bundle-cache/
 Package.resolved
 Transcription Windows/.cache/
 Transcription Windows/vendor/

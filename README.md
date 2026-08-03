@@ -5,7 +5,7 @@ Local transcription workflows using OpenAI Whisper, organized by platform.
 ## Project Layout
 
 - `Transcription macOS/`: macOS-oriented Apple workflows with `.command` launchers and shell wrappers.
-- `Transcription macOS App/`: native SwiftUI macOS app wrapping the same Whisper workflow.
+- `Transcription macOS App/`: native, offline-fähige SwiftUI-App mit `whisper.cpp`, Sprechererkennung, Editor, Audio- und Videoeingabe sowie mehreren Ausgabeformaten.
 - `Transcription Windows/`: Windows 10+ Tkinter desktop app, batch installers, and PyInstaller build helper.
 - `AGENTS.md`: contributor and agent guidelines.
 
@@ -53,6 +53,10 @@ device: "mps"
 source_file: "audio.mp3"
 fps_timecode: 25
 timecodes: true
+language: "de"
+engine: "whisper.cpp"
+diarization: true
+speaker_count: 2
 ---
 ```
 
@@ -60,6 +64,7 @@ timecodes: true
 
 - Python 3.10+
 - `ffmpeg` available on `PATH`
-- Python packages: `torch`, `openai-whisper`
+- Der Entwicklungsbetrieb benötigt die in `Transcription macOS App/requirements-macos.txt` aufgeführten Python-Pakete.
+- Der Offline-Release der macOS-App bündelt Laufzeit, Binärdateien und Modelle für Apple Silicon.
 
 See each platform folder for detailed setup and usage notes.

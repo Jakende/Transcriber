@@ -1,0 +1,13 @@
+# Runtime dependencies for the offline Apple-Silicon app bundle.
+# Versions are pinned so release artifacts can be reproduced.
+torch==2.11.0
+torchaudio==2.11.0
+speechbrain==1.1.0
+silero-vad==6.2.1
+scikit-learn==1.9.0
+soundfile==0.14.0
+spacy==3.8.13
+huggingface-hub==1.26.0
+cmake==4.4.0
+de_core_news_sm @ https://github.com/explosion/spacy-models/releases/download/de_core_news_sm-3.8.0/de_core_news_sm-3.8.0-py3-none-any.whl
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl

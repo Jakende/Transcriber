@@ -17,8 +17,13 @@ let package = Package(
                 "Resources/__pycache__"
             ],
             resources: [
-                .copy("Resources/transcribe_bulk.py")
+                .copy("Resources/transcribe_bulk.py"),
+                .copy("Resources/transcription_backend")
             ]
+        ),
+        .testTarget(
+            name: "TranscriptionMacOSAppTests",
+            dependencies: ["TranscriptionMacOSApp"]
         )
     ]
 )
