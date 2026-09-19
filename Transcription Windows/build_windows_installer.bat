@@ -17,12 +17,19 @@ if errorlevel 1 (
     exit /b 1
 )
 
-ISCC.exe installer\TranscriptionWindows.iss
+set "APP_VERSION=2.1"
+set "OUTPUT_NAME=Transcription-Windows-Setup-v2.1"
+if not "%RELEASE_TAG%"=="" (
+    set "APP_VERSION=%RELEASE_TAG:v=%"
+    set "OUTPUT_NAME=Transcription-Windows-Setup-%RELEASE_TAG%"
+)
+
+ISCC.exe /DMyAppVersion=%APP_VERSION% /DMyOutputBaseFilename=%OUTPUT_NAME% installer\TranscriptionWindows.iss
 if errorlevel 1 goto error
 
 echo.
 echo Installer complete:
-echo dist\Transcription-Windows-Setup-v1.0.exe
+echo dist\%OUTPUT_NAME%.exe
 if /i not "%CI%"=="true" pause
 exit /b 0
 

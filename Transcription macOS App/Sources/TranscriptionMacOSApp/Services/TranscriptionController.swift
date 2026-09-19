@@ -10,10 +10,25 @@ final class TranscriptionController: ObservableObject {
     @Published var estimateLine = ""
     @Published var progressValue = 0.0
     @Published var isRunning = false
+    @Published private(set) var archivedResultIDs: Set<String> = []
 
     let runner = PythonTranscriptionRunner()
     private var activeFiles: [SelectedMediaFile] = []
     private var startedAt: Date?
+
+    init() {
+        archivedResultIDs = ResultLibraryStore.archivedIDs()
+        results = runner.loadStoredResults()
+        files = PendingQueueStore.load()
+            .filter { FileManager.default.fileExists(atPath: $0.url.path) && MediaFileSupport.isSupported($0.url) }
+        if !results.isEmpty {
+            logEntries = [LogEntry(
+                timestamp: Date(),
+                message: "\(results.count) gespeicherte\(results.count == 1 ? "s Ergebnis" : " Ergebnisse") wiederhergestellt.",
+                kind: .info
+            )]
+        }
+    }
 
     func addFiles(_ urls: [URL]) {
         var seen = Set(files.map { $0.url.standardizedFileURL })
@@ -26,9 +41,10 @@ final class TranscriptionController: ObservableObject {
                 continue
             }
             guard seen.insert(url).inserted else { continue }
-            additions.append(SelectedMediaFile(url: url))
+            additions.append(SelectedMediaFile(url: url, podcastMetadata: PodcastDownloadRegistry.metadata(for: url)))
         }
         files.append(contentsOf: additions)
+        PendingQueueStore.save(files)
         if !additions.isEmpty {
             appendLog("\(additions.count) Datei\(additions.count == 1 ? "" : "en") hinzugefügt.", kind: .info)
         }
@@ -37,24 +53,48 @@ final class TranscriptionController: ObservableObject {
         }
     }
 
-    func remove(_ file: SelectedMediaFile) { files.removeAll { $0.id == file.id } }
+    func addDownloadedMediaFiles(_ additions: [SelectedMediaFile]) {
+        var seen = Set(files.map { $0.url.standardizedFileURL })
+        let newFiles = additions.filter { seen.insert($0.url.standardizedFileURL).inserted }
+        files.append(contentsOf: newFiles)
+        PendingQueueStore.save(files)
+        for file in newFiles where file.podcastMetadata != nil {
+            PodcastDownloadRegistry.register(file)
+        }
+        if !newFiles.isEmpty {
+            appendLog("\(newFiles.count) heruntergeladene Mediendatei\(newFiles.count == 1 ? "" : "en") zur Warteschlange hinzugefügt.", kind: .success)
+        }
+    }
+
+    func remove(_ file: SelectedMediaFile) {
+        files.removeAll { $0.id == file.id }
+        PendingQueueStore.save(files)
+    }
+
+    func clearFiles() {
+        files.removeAll()
+        PendingQueueStore.save(files)
+    }
 
     func start(settings: TranscriptionSettings) {
-        guard !files.isEmpty, !settings.outputFormats.isEmpty else { return }
-        activeFiles = files
-        results = []
+        start(files: files, settings: settings)
+    }
+
+    func start(files selectedFiles: [SelectedMediaFile], settings: TranscriptionSettings) {
+        guard !selectedFiles.isEmpty, !settings.outputFormats.isEmpty, !isRunning else { return }
+        activeFiles = selectedFiles
         progressValue = 0
         estimateLine = ""
         startedAt = Date()
         progressLine = "Bereite Stapel vor …"
         isRunning = true
         appendLog("Transkription gestartet.", kind: .info)
-        Task {
+        Task { [self] in
             do {
-                try await runner.run(files: activeFiles, settings: settings) { [weak self] event in
-                    self?.handle(event)
-                } onDiagnostic: { [weak self] line in
-                    self?.appendLog(line, kind: .info)
+                try await runner.run(files: selectedFiles, settings: settings) { event in
+                    self.handle(event)
+                } onDiagnostic: { line in
+                    self.appendLog(line, kind: .info)
                 }
                 if isRunning {
                     progressValue = 1
@@ -90,7 +130,7 @@ final class TranscriptionController: ObservableObject {
             speakerCount: document.speakerNames.count,
             segmentCount: document.segments.count
         )
-        results.append(result)
+        upsert(result)
         appendLog("VTT importiert: \(vttURL.lastPathComponent)", kind: .success)
         return result
     }
@@ -103,9 +143,41 @@ final class TranscriptionController: ObservableObject {
         }
     }
 
-    func updateResult(_ result: TranscriptionResult, outputs: [String: String]) {
-        guard let index = results.firstIndex(where: { $0.id == result.id }) else { return }
-        results[index].outputs = outputs
+    func isArchived(_ result: TranscriptionResult) -> Bool {
+        archivedResultIDs.contains(result.id)
+    }
+
+    func toggleArchive(_ result: TranscriptionResult) {
+        if archivedResultIDs.contains(result.id) {
+            archivedResultIDs.remove(result.id)
+        } else {
+            archivedResultIDs.insert(result.id)
+        }
+        ResultLibraryStore.saveArchivedIDs(archivedResultIDs)
+    }
+
+    func moveInternalRecordToTrash(_ result: TranscriptionResult) {
+        NSWorkspace.shared.recycle([result.documentURL]) { [weak self] _, error in
+            Task { @MainActor in
+                guard let self else { return }
+                if let error {
+                    self.appendLog("Ergebnis konnte nicht in den Papierkorb bewegt werden: \(error.localizedDescription)", kind: .error)
+                    return
+                }
+                self.results.removeAll { $0.id == result.id }
+                self.archivedResultIDs.remove(result.id)
+                ResultLibraryStore.saveArchivedIDs(self.archivedResultIDs)
+                self.appendLog("Interner Bearbeitungsstand in den Papierkorb bewegt: \(result.sourceURL.lastPathComponent)", kind: .success)
+            }
+        }
+    }
+
+    func updateResult(_ result: TranscriptionResult, document: TranscriptDocument) {
+        var updated = result
+        updated.outputs = document.outputs
+        updated.speakerCount = SpeakerEditingSupport.labels(in: document).count
+        updated.segmentCount = document.segments.count
+        upsert(updated)
     }
 
     func clearLog() {
@@ -139,7 +211,7 @@ final class TranscriptionController: ObservableObject {
                 speakerCount: event.speakerCount ?? 0,
                 segmentCount: event.segmentCount ?? 0
             )
-            results.append(result)
+            upsert(result)
             appendLog("Gespeichert: \(result.sourceURL.lastPathComponent)", kind: .success)
         case "file_error", "fatal_error":
             appendLog(event.message ?? "Unbekannter Fehler", kind: .error)
@@ -155,6 +227,14 @@ final class TranscriptionController: ObservableObject {
     private func fileIndex(from fileID: String?) -> Int {
         guard let fileID, let value = Int(fileID.replacingOccurrences(of: "file-", with: "")) else { return 0 }
         return value
+    }
+
+    private func upsert(_ result: TranscriptionResult) {
+        if let index = results.firstIndex(where: { $0.id == result.id }) {
+            results[index] = result
+        } else {
+            results.insert(result, at: 0)
+        }
     }
 
     private func duration(_ seconds: TimeInterval) -> String {

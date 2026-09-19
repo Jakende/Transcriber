@@ -11,6 +11,7 @@ struct TranscriptEditorView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.undoManager) private var undoManager
     @State private var document: TranscriptDocument
     @State private var section: Section = .transcript
     @State private var status = ""
@@ -20,17 +21,21 @@ struct TranscriptEditorView: View {
     @State private var isAnalyzingGlossary = false
     @State private var bulkSpeaker = ""
     @State private var exportFormats: Set<OutputFormat>
+    @State private var pendingSpeakerMerge: SpeakerMerge?
+    @State private var autosaveTask: Task<Void, Never>?
+    @State private var transcriptSearch = ""
     @StateObject private var playback: AudioPlaybackController
+    @StateObject private var undoCoordinator = TranscriptUndoCoordinator()
 
     let result: TranscriptionResult
     let runner: PythonTranscriptionRunner
-    let onSaved: ([String: String]) -> Void
+    let onSaved: (TranscriptDocument) -> Void
 
     init(
         initialDocument: TranscriptDocument,
         result: TranscriptionResult,
         runner: PythonTranscriptionRunner,
-        onSaved: @escaping ([String: String]) -> Void
+        onSaved: @escaping (TranscriptDocument) -> Void
     ) {
         _document = State(initialValue: initialDocument)
         _exportFormats = State(initialValue: Set(initialDocument.outputs.keys.compactMap(OutputFormat.init(rawValue:))) .isEmpty ? [.vtt] : Set(initialDocument.outputs.keys.compactMap(OutputFormat.init(rawValue:))))
@@ -59,12 +64,42 @@ struct TranscriptEditorView: View {
             }
             playbackBar
         }
-        .onDisappear { playback.stop() }
+        .onChange(of: document.segments) { _ in scheduleAutosave() }
+        .onChange(of: document.speakerNames) { _ in scheduleAutosave() }
+        .onChange(of: document.speakerRegions) { _ in scheduleAutosave() }
+        .onAppear {
+            undoCoordinator.apply = { restored in document = restored }
+            if document.language == TranscriptLanguage.mixed.rawValue {
+                SegmentLanguageSupport.annotate(&document)
+            }
+        }
+        .alert(item: $pendingSpeakerMerge) { merge in
+            Alert(
+                title: Text("Sprecher zusammenführen?"),
+                message: Text("Alle Abschnitte von „\(displayName(merge.source))“ werden „\(displayName(merge.target))“ zugeordnet. Die Zusammenführung wird automatisch gespeichert und kann mit „Rückgängig“ zurückgenommen werden."),
+                primaryButton: .destructive(Text("Zusammenführen")) { mergeSpeakers(merge) },
+                secondaryButton: .cancel()
+            )
+        }
+        .onDisappear {
+            autosaveTask?.cancel()
+            undoCoordinator.apply = nil
+            persistDraft(showStatus: false)
+            playback.stop()
+        }
     }
 
     private var toolbar: some View {
         HStack(spacing: 12) {
             Button("Schließen") { dismiss() }
+            Button { undoManager?.undo() } label: { Image(systemName: "arrow.uturn.backward") }
+                .help("Rückgängig (⌘Z)")
+                .disabled(undoManager?.canUndo != true)
+                .keyboardShortcut("z", modifiers: .command)
+            Button { undoManager?.redo() } label: { Image(systemName: "arrow.uturn.forward") }
+                .help("Wiederholen (⇧⌘Z)")
+                .disabled(undoManager?.canRedo != true)
+                .keyboardShortcut("z", modifiers: [.command, .shift])
             VStack(alignment: .leading, spacing: 2) {
                 Text(document.sourceFile).font(.headline).lineLimit(1)
                 Text(status.isEmpty ? "\(document.segments.count) Segmente" : status)
@@ -76,6 +111,7 @@ struct TranscriptEditorView: View {
                     Toggle(format.title, isOn: formatBinding(format))
                 }
             }
+            .fixedSize()
             Button("Exportieren …") { exportDocument() }.disabled(isSaving || isAnalyzingGlossary || exportFormats.isEmpty)
             Button(isSaving ? "Speichert …" : "Speichern") { saveDocument() }
                 .buttonStyle(.borderedProminent)
@@ -96,40 +132,78 @@ struct TranscriptEditorView: View {
                 }.labelsHidden().frame(maxWidth: 220)
                 Button("Allen zuweisen") {
                     guard !bulkSpeaker.isEmpty else { return }
-                    for index in document.segments.indices { document.segments[index].speaker = bulkSpeaker }
+                    performUndoable("Sprecher allen zuweisen") { draft in
+                        for index in draft.segments.indices { draft.segments[index].speaker = bulkSpeaker }
+                    }
                 }.disabled(bulkSpeaker.isEmpty)
                 Button("Nur leeren zuweisen") {
                     guard !bulkSpeaker.isEmpty else { return }
-                    for index in document.segments.indices where document.segments[index].speaker == nil {
-                        document.segments[index].speaker = bulkSpeaker
+                    performUndoable("Leere Sprecher zuweisen") { draft in
+                        for index in draft.segments.indices where draft.segments[index].speaker == nil {
+                            draft.segments[index].speaker = bulkSpeaker
+                        }
                     }
                 }.disabled(bulkSpeaker.isEmpty)
                 Spacer()
+                TextField("Transkript durchsuchen", text: $transcriptSearch)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 240)
             }
             .padding(.horizontal, 16)
 
             List {
                 ForEach($document.segments) { $segment in
-                    HStack(alignment: .top, spacing: 10) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("\(clock(segment.start)) – \(clock(segment.end))")
-                                .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
-                            Button("Anhören") { playback.play(start: segment.start, end: segment.end) }
-                        }.frame(width: 110, alignment: .leading)
-                        Picker("Sprecher", selection: $segment.speaker) {
-                            Text("Ohne Sprecher").tag(String?.none)
-                            ForEach(speakerLabels, id: \.self) { label in
-                                Text(document.speakerNames[label] ?? label).tag(String?.some(label))
+                    if matchesSearch(segment) {
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("\(clock(segment.start)) – \(clock(segment.end))")
+                                    .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                                if let language = SegmentLanguageSupport.title(for: segment.language) {
+                                    Text(language)
+                                        .font(.caption2.bold())
+                                        .foregroundStyle(.secondary)
+                                }
+                                Button("Anhören") { playback.play(start: segment.start, end: segment.end) }
                             }
-                        }.labelsHidden().frame(width: 150)
-                        TextEditor(text: $segment.text)
-                            .font(.body)
-                            .frame(minHeight: 54)
-                        Button(role: .destructive) {
-                            document.segments.removeAll { $0.id == segment.id }
-                        } label: { Image(systemName: "trash") }
-                        .buttonStyle(.plain)
-                    }.padding(.vertical, 5)
+                            .frame(width: 110, alignment: .leading)
+                            Picker("Sprecher", selection: $segment.speaker) {
+                                Text("Ohne Sprecher").tag(String?.none)
+                                ForEach(speakerLabels, id: \.self) { label in
+                                    Text(document.speakerNames[label] ?? label).tag(String?.some(label))
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 150)
+                            TextEditor(text: $segment.text)
+                                .font(.body)
+                                .frame(minHeight: 54)
+                            Menu {
+                                Button("Segment teilen") {
+                                    performUndoable("Segment teilen") { draft in
+                                        TranscriptEditingSupport.split(segmentID: segment.id, in: &draft)
+                                    }
+                                }
+                                .disabled(segment.text.split(separator: " ").count < 2)
+                                Button("Mit nächstem Segment verbinden") {
+                                    performUndoable("Segmente verbinden") { draft in
+                                        TranscriptEditingSupport.mergeWithNext(segmentID: segment.id, in: &draft)
+                                    }
+                                }
+                                .disabled(document.segments.last?.id == segment.id)
+                                Divider()
+                                Button("Segment löschen", role: .destructive) {
+                                    performUndoable("Segment löschen") { draft in
+                                        draft.segments.removeAll { $0.id == segment.id }
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                            }
+                            .menuStyle(.borderlessButton)
+                            .menuIndicator(.hidden)
+                            .frame(width: 24)
+                        }.padding(.vertical, 5)
+                    }
                 }
             }
         }
@@ -138,10 +212,15 @@ struct TranscriptEditorView: View {
     private var speakerEditor: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 12) {
-                Text("Benennen Sie die erkannten Stimmen. Eine Hörprobe verwendet den längsten verfügbaren Abschnitt.")
+                Text("Benennen oder prüfen Sie die erkannten Stimmen. Eine Hörprobe verwendet den längsten verfügbaren Abschnitt; falsch getrennte Stimmen können zusammengeführt werden.")
                     .foregroundStyle(.secondary)
                 if speakerLabels.isEmpty {
-                    emptyState("Keine Sprecher erkannt", symbol: "person.2.slash")
+                    emptyState(
+                        document.diarization
+                            ? "Keine Sprecher erkannt"
+                            : "Sprechererkennung war für diese Transkription ausgeschaltet",
+                        symbol: "person.2.slash"
+                    )
                 }
                 ForEach(speakerLabels, id: \.self) { label in
                     HStack(spacing: 12) {
@@ -150,6 +229,14 @@ struct TranscriptEditorView: View {
                         Button("Hörprobe") {
                             if let window = sampleWindow(for: label) { playback.play(start: window.0, end: window.1, loop: true) }
                         }
+                        Menu("Zusammenführen …") {
+                            ForEach(speakerLabels.filter { $0 != label }, id: \.self) { target in
+                                Button("Mit \(displayName(target))") {
+                                    pendingSpeakerMerge = SpeakerMerge(source: label, target: target)
+                                }
+                            }
+                        }
+                        .disabled(speakerLabels.count < 2)
                         Spacer()
                         Text(durationForSpeaker(label), format: .number.precision(.fractionLength(1)))
                         Text("Sek.").foregroundStyle(.secondary)
@@ -207,7 +294,7 @@ struct TranscriptEditorView: View {
         .background(.bar)
     }
 
-    private var speakerLabels: [String] { document.speakerNames.keys.sorted() }
+    private var speakerLabels: [String] { SpeakerEditingSupport.labels(in: document) }
 
     private func emptyState(_ title: String, symbol: String) -> some View {
         VStack(spacing: 8) {
@@ -218,6 +305,8 @@ struct TranscriptEditorView: View {
     }
 
     private func saveDocument() {
+        autosaveTask?.cancel()
+        autosaveTask = nil
         isSaving = true
         status = "Speichert …"
         Task {
@@ -230,7 +319,9 @@ struct TranscriptEditorView: View {
                 } else {
                     outputs = try await runner.save(document: document, at: result.documentURL)
                 }
-                onSaved(outputs)
+                document.outputs = outputs
+                _ = try runner.store(document: document)
+                onSaved(document)
                 status = "Gespeichert"
             } catch { status = "Fehler: \(error.localizedDescription)" }
             isSaving = false
@@ -239,12 +330,16 @@ struct TranscriptEditorView: View {
 
     private func exportDocument() {
         guard let folder = chooseExportFolder() else { return }
+        autosaveTask?.cancel()
+        autosaveTask = nil
         isSaving = true
         status = "Exportiert …"
         Task {
             do {
                 let outputs = try await runner.export(document: document, to: folder, formats: exportFormats)
-                onSaved(outputs)
+                document.outputs.merge(outputs) { _, new in new }
+                _ = try runner.store(document: document)
+                onSaved(document)
                 status = "Export abgeschlossen"
             } catch { status = "Fehler: \(error.localizedDescription)" }
             isSaving = false
@@ -278,9 +373,12 @@ struct TranscriptEditorView: View {
 
     private func applyGlossary() {
         let count = GlossarySupport.activeReplacementCount(replacements)
-        for index in document.segments.indices {
-            document.segments[index].text = GlossarySupport.applying(replacements, to: document.segments[index].text)
+        performUndoable("Begriffsersetzungen anwenden") { draft in
+            for index in draft.segments.indices {
+                draft.segments[index].text = GlossarySupport.applying(replacements, to: draft.segments[index].text)
+            }
         }
+        GlossaryStore.add(replacements: replacements)
         status = "\(count) Ersetzungen angewendet"
     }
 
@@ -307,6 +405,53 @@ struct TranscriptEditorView: View {
         Binding(get: { document.speakerNames[label] ?? label }, set: { document.speakerNames[label] = String($0.prefix(60)) })
     }
 
+    private func mergeSpeakers(_ merge: SpeakerMerge) {
+        let sourceName = displayName(merge.source)
+        let targetName = displayName(merge.target)
+        performUndoable("Sprecher zusammenführen") { draft in
+            SpeakerEditingSupport.merge(merge.source, into: merge.target, in: &draft)
+        }
+        if bulkSpeaker == merge.source { bulkSpeaker = merge.target }
+        status = "„\(sourceName)“ wurde mit „\(targetName)“ zusammengeführt"
+        scheduleAutosave()
+    }
+
+    private func displayName(_ label: String) -> String {
+        document.speakerNames[label] ?? label
+    }
+
+    private func matchesSearch(_ segment: TranscriptSegment) -> Bool {
+        let query = transcriptSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+        return segment.text.localizedCaseInsensitiveContains(query)
+            || displayName(segment.speaker ?? "").localizedCaseInsensitiveContains(query)
+    }
+
+    private func performUndoable(_ name: String, change: (inout TranscriptDocument) -> Void) {
+        let previous = document
+        change(&document)
+        undoCoordinator.register(previous: previous, current: document, name: name, with: undoManager)
+    }
+
+    private func scheduleAutosave() {
+        autosaveTask?.cancel()
+        autosaveTask = Task {
+            try? await Task.sleep(nanoseconds: 750_000_000)
+            guard !Task.isCancelled else { return }
+            persistDraft(showStatus: true)
+        }
+    }
+
+    private func persistDraft(showStatus: Bool) {
+        do {
+            _ = try runner.store(document: document)
+            onSaved(document)
+            if showStatus && !isSaving && !isAnalyzingGlossary { status = "Entwurf automatisch gespeichert" }
+        } catch {
+            if showStatus { status = "Fehler beim automatischen Speichern: \(error.localizedDescription)" }
+        }
+    }
+
     private func replacementBinding(_ term: String) -> Binding<String> {
         Binding(get: { replacements[term] ?? "" }, set: { replacements[term] = $0 })
     }
@@ -321,6 +466,31 @@ struct TranscriptEditorView: View {
     private func clock(_ seconds: Double) -> String {
         let value = max(0, Int(seconds.rounded()))
         return String(format: "%02d:%02d:%02d", value / 3600, (value % 3600) / 60, value % 60)
+    }
+}
+
+private struct SpeakerMerge: Identifiable {
+    let source: String
+    let target: String
+    var id: String { "\(source)->\(target)" }
+}
+
+@MainActor
+private final class TranscriptUndoCoordinator: ObservableObject {
+    var apply: ((TranscriptDocument) -> Void)?
+
+    func register(
+        previous: TranscriptDocument,
+        current: TranscriptDocument,
+        name: String,
+        with undoManager: UndoManager?
+    ) {
+        guard previous != current, let undoManager else { return }
+        undoManager.registerUndo(withTarget: self) { target in
+            target.apply?(previous)
+            target.register(previous: current, current: previous, name: name, with: undoManager)
+        }
+        undoManager.setActionName(name)
     }
 }
 

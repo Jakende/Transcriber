@@ -3,7 +3,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @StateObject private var controller = TranscriptionController()
+    @EnvironmentObject private var controller: TranscriptionController
+    @Environment(\.openWindow) private var openWindow
     @AppStorage("transcription.language") private var languageRaw = TranscriptLanguage.german.rawValue
     @AppStorage("transcription.model") private var modelRaw = WhisperModel.turbo.rawValue
     @AppStorage("transcription.timecodes") private var includeTimecodes = true
@@ -13,11 +14,17 @@ struct ContentView: View {
     @AppStorage("transcription.outputVTT") private var outputVTT = false
     @AppStorage("transcription.outputTXT") private var outputTXT = false
     @AppStorage("transcription.outputCSV") private var outputCSV = false
-    @State private var outputMarkdown = true
-    @State private var useSourceFolder = true
+    @AppStorage("transcription.outputSRT") private var outputSRT = false
+    @AppStorage("transcription.outputMarkdown") private var outputMarkdown = true
+    @AppStorage("transcription.useSourceFolder") private var useSourceFolder = true
     @State private var outputFolder: URL?
     @State private var dropTargeted = false
-    @State private var editorSession: EditorSession?
+    @State private var resultSearch = ""
+    @AppStorage("transcription.showArchivedResults") private var showArchivedResults = false
+    @State private var pendingResultDeletion: TranscriptionResult?
+    @State private var showDiagnostics = false
+    @State private var showGlossaryManager = false
+    @State private var showMediaBrowser = false
 
     init() {
         _outputFolder = State(initialValue: BookmarkStore.loadOutputFolder())
@@ -29,25 +36,44 @@ struct ContentView: View {
         } detail: {
             detail
         }
-        .sheet(item: $editorSession) { session in
-            TranscriptEditorView(
-                initialDocument: session.document,
-                result: session.result,
-                runner: controller.runner
-            ) { outputs in
-                controller.updateResult(session.result, outputs: outputs)
+        .alert(item: $pendingResultDeletion) { result in
+            Alert(
+                title: Text("Bearbeitungsstand in den Papierkorb bewegen?"),
+                message: Text("Der interne Bearbeitungsstand für „\(result.sourceURL.lastPathComponent)“ wird entfernt. Quelldatei und bereits exportierte Dateien bleiben erhalten."),
+                primaryButton: .destructive(Text("In den Papierkorb")) {
+                    controller.moveInternalRecordToTrash(result)
+                },
+                secondaryButton: .cancel()
+            )
+        }
+        .sheet(isPresented: $showDiagnostics) {
+            DiagnosticsView(runner: controller.runner)
+        }
+        .sheet(isPresented: $showGlossaryManager) {
+            GlossaryManagerView()
+        }
+        .sheet(isPresented: $showMediaBrowser) {
+            MediaBrowserView(settingsProvider: { settings }) { files, autostart, snapshot in
+                controller.addDownloadedMediaFiles(files)
+                if autostart { controller.start(files: files, settings: snapshot) }
             }
-            .frame(minWidth: 900, minHeight: 650)
         }
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Button("Dateien hinzufügen") { selectFiles() }
-                Button("VTT importieren") { importVTT() }
-                Button("Leeren") { controller.files.removeAll() }
-                    .disabled(controller.files.isEmpty || controller.isRunning)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Button("Dateien hinzufügen") { selectFiles() }
+                    Button("Medien laden") { showMediaBrowser = true }
+                        .disabled(controller.isRunning)
+                }
+                HStack(spacing: 8) {
+                    Button("VTT importieren") { importVTT() }
+                    Spacer()
+                    Button("Leeren") { controller.clearFiles() }
+                        .disabled(controller.files.isEmpty || controller.isRunning)
+                }
             }
             if controller.files.isEmpty {
                 VStack(spacing: 8) {
@@ -56,7 +82,7 @@ struct ContentView: View {
                         .foregroundStyle(dropTargeted ? Color.accentColor : Color.secondary)
                     Text(dropTargeted ? "Dateien hier ablegen" : "Keine Dateien ausgewählt")
                         .font(.headline)
-                    Text("Audio oder Video hinzufügen oder hierher ziehen.")
+                    Text("Audio, Video oder heruntergeladene Medien hinzufügen.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -92,7 +118,12 @@ struct ContentView: View {
     private var detail: some View {
         VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Transcription macOS").font(.title2.bold())
+                HStack {
+                    Text("Transcription macOS").font(.title2.bold())
+                    Spacer()
+                    Button("Wörterbuch") { showGlossaryManager = true }
+                    Button("System prüfen") { showDiagnostics = true }
+                }
                 Text("Lokale Transkription mit Sprechererkennung und vollständiger Nachbearbeitung.")
                     .foregroundStyle(.secondary)
             }
@@ -107,9 +138,16 @@ struct ContentView: View {
         Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 12) {
             GridRow {
                 Text("Sprache")
-                Picker("Sprache", selection: $languageRaw) {
-                    ForEach(TranscriptLanguage.allCases) { Text($0.title).tag($0.rawValue) }
-                }.labelsHidden()
+                HStack {
+                    Picker("Sprache", selection: $languageRaw) {
+                        ForEach(TranscriptLanguage.allCases) { Text($0.title).tag($0.rawValue) }
+                    }.labelsHidden()
+                    if languageRaw == TranscriptLanguage.mixed.rawValue {
+                        Text("Whisper erkennt Deutsch und Englisch automatisch innerhalb der Aufnahme.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             GridRow {
                 Text("Whisper-Modell")
@@ -130,17 +168,22 @@ struct ContentView: View {
             }
             GridRow {
                 Text("Trennung")
-                Picker("Trennung", selection: $separationRaw) {
-                    ForEach(SeparationPreset.allCases) { Text($0.title).tag($0.rawValue) }
+                HStack {
+                    Picker("Trennung", selection: $separationRaw) {
+                        ForEach(SeparationPreset.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
+                    .labelsHidden()
+                    .disabled(!diarizationEnabled)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .labelsHidden()
-                .disabled(!diarizationEnabled)
             }
             GridRow {
                 Text("Ausgaben")
                 HStack(spacing: 14) {
                     Toggle("Markdown", isOn: $outputMarkdown)
                     Toggle("VTT", isOn: $outputVTT)
+                    Toggle("SRT", isOn: $outputSRT)
                     Toggle("TXT", isOn: $outputTXT)
                     Toggle("CSV", isOn: $outputCSV)
                     Toggle("Zeitcodes", isOn: $includeTimecodes)
@@ -187,22 +230,52 @@ struct ContentView: View {
 
     private var resultAndLogPanel: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Ergebnisse").font(.headline)
-            ForEach(controller.results) { result in
-                HStack(spacing: 10) {
-                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(result.sourceURL.lastPathComponent).lineLimit(1)
-                        Text("\(result.segmentCount) Segmente · \(result.speakerCount) Sprecher · \(result.outputs.keys.sorted().joined(separator: ", "))")
-                            .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text("Ergebnisse").font(.headline)
+                Spacer()
+                TextField("Ergebnisse durchsuchen", text: $resultSearch)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 230)
+                Toggle("Archiv anzeigen", isOn: $showArchivedResults)
+                    .toggleStyle(.checkbox)
+            }
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    ForEach(visibleResults) { result in
+                        HStack(spacing: 10) {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(result.sourceURL.lastPathComponent).lineLimit(1)
+                                Text("\(result.segmentCount) Segmente · \(result.speakerCount) Sprecher · \(result.outputs.keys.sorted().joined(separator: ", "))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Bearbeiten") { openEditor(result) }
+                            Button("Im Finder") { controller.reveal(result: result) }
+                            Menu {
+                                Button(controller.isArchived(result) ? "Aus Archiv holen" : "Archivieren") {
+                                    controller.toggleArchive(result)
+                                }
+                                Divider()
+                                Button("Bearbeitungsstand löschen …", role: .destructive) {
+                                    pendingResultDeletion = result
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                            }
+                            .menuStyle(.borderlessButton)
+                        }
+                        .padding(10)
+                        .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator, lineWidth: 1))
                     }
-                    Spacer()
-                    Button("Bearbeiten") { openEditor(result) }
-                    Button("Im Finder") { controller.reveal(result: result) }
                 }
-                .padding(10)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(.separator, lineWidth: 1))
+            }
+            .frame(maxHeight: 280)
+            if visibleResults.isEmpty {
+                Text(resultSearch.isEmpty ? "Keine Ergebnisse in dieser Ansicht." : "Keine passenden Ergebnisse gefunden.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             DisclosureGroup("Aktivität") { logContent.frame(minHeight: 120) }
         }
@@ -259,9 +332,20 @@ struct ContentView: View {
         var formats: Set<OutputFormat> = []
         if outputMarkdown { formats.insert(.markdown) }
         if outputVTT { formats.insert(.vtt) }
+        if outputSRT { formats.insert(.srt) }
         if outputTXT { formats.insert(.txt) }
         if outputCSV { formats.insert(.csv) }
         return formats
+    }
+
+    private var visibleResults: [TranscriptionResult] {
+        let query = resultSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return controller.results.filter { result in
+            (showArchivedResults || !controller.isArchived(result))
+                && (query.isEmpty
+                    || result.sourceURL.lastPathComponent.localizedCaseInsensitiveContains(query)
+                    || result.sourceURL.deletingLastPathComponent().path.localizedCaseInsensitiveContains(query))
+        }
     }
 
     private var canRun: Bool {
@@ -306,9 +390,7 @@ struct ContentView: View {
     }
 
     private func openEditor(_ result: TranscriptionResult) {
-        do {
-            editorSession = EditorSession(result: result, document: try controller.runner.loadDocument(at: result.documentURL))
-        } catch { controller.appendLog(error.localizedDescription, kind: .error) }
+        openWindow(value: result.documentURL.path)
     }
 
     private func receiveDrop(_ providers: [NSItemProvider]) -> Bool {
@@ -330,10 +412,4 @@ struct ContentView: View {
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter(); formatter.dateFormat = "HH:mm:ss"; return formatter
     }()
-}
-
-private struct EditorSession: Identifiable {
-    let id = UUID()
-    let result: TranscriptionResult
-    let document: TranscriptDocument
 }

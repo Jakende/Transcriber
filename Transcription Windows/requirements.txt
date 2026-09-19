@@ -1,3 +1,16 @@
-torch
-openai-whisper
-pyinstaller
+torch==2.11.0
+torchaudio==2.11.0
+openai-whisper==20250625
+speechbrain==1.1.0
+silero-vad==6.2.1
+scikit-learn==1.9.0
+soundfile==0.14.0
+spacy==3.8.13
+huggingface-hub==1.26.0
+yt-dlp[default]==2026.8.19
+de_core_news_sm @ https://github.com/explosion/spacy-models/releases/download/de_core_news_sm-3.8.0/de_core_news_sm-3.8.0-py3-none-any.whl
+en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+keyring==25.7.0
+send2trash==2.1.0
+tkinterdnd2==0.6.3
+pyinstaller==6.22.3

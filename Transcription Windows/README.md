@@ -1,5 +1,5 @@
 # Transcription Windows
 
-This folder contains the Windows 10+ desktop app and helper scripts.
+Dieser Ordner enthält die Windows-10+-Desktop-App, ihre Medien-, Editor- und Transkriptionsdienste sowie Build- und Installer-Hilfen.
 
-Use `README_WINDOWS.md` for setup, usage, output format, and `.exe` build instructions.
+Einrichtung, Funktionsumfang und Build-Anleitung stehen in `README_WINDOWS.md`.

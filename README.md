@@ -1,12 +1,12 @@
 # Transcription Toolkit
 
-Local transcription workflows using OpenAI Whisper, organized by platform.
+Lokale Transkriptionswerkzeuge mit funktional abgestimmten Apps für macOS und Windows.
 
 ## Project Layout
 
 - `Transcription macOS/`: macOS-oriented Apple workflows with `.command` launchers and shell wrappers.
 - `Transcription macOS App/`: native, offline-fähige SwiftUI-App mit `whisper.cpp`, Sprechererkennung, Editor, Audio- und Videoeingabe sowie mehreren Ausgabeformaten.
-- `Transcription Windows/`: Windows 10+ Tkinter desktop app, batch installers, and PyInstaller build helper.
+- `Transcription Windows/`: Windows-10+-App mit Medienimport, Sprechererkennung, Editor, Ergebnisbibliothek und PyInstaller-/Inno-Setup-Build.
 - `AGENTS.md`: contributor and agent guidelines.
 
 ## Quick Start
@@ -36,15 +36,16 @@ run_windows_app.bat
 
 ## Releases
 
-Ein GitHub-Tag wie `v2.0` baut und veröffentlicht eine Release über GitHub Actions:
+Ein GitHub-Tag wie `v2.1` baut, prüft und veröffentlicht beide Plattformen über GitHub Actions:
 
-- `Transcription-macOS-v2.0.zip.part-*` und zugehörige SHA-256-Datei
-- `Transcription Windows.exe`
+- `Transcription-macOS-v2.1.zip.part-*` und zugehörige SHA-256-Datei
+- `Transcription-Windows-v2.1.exe` und SHA-256-Datei
+- `Transcription-Windows-Setup-v2.1.exe` und SHA-256-Datei
 
 Die macOS-Archivteile werden vor dem Entpacken zusammengefügt:
 
 ```bash
-cat Transcription-macOS-v2.0.zip.part-* > Transcription-macOS-v2.0.zip
+cat Transcription-macOS-v2.1.zip.part-* > Transcription-macOS-v2.1.zip
 ```
 
 ## Output Format
@@ -69,8 +70,9 @@ speaker_count: 2
 ## Requirements
 
 - Python 3.10+
-- `ffmpeg` available on `PATH`
+- `ffmpeg` im Entwicklungsbetrieb auf `PATH`; die Release-Apps bringen es mit
 - Der Entwicklungsbetrieb benötigt die in `Transcription macOS App/requirements-macos.txt` aufgeführten Python-Pakete.
 - Der Offline-Release der macOS-App bündelt Laufzeit, Binärdateien und Modelle für Apple Silicon.
+- Die Windows-Release-App bündelt Laufzeit und Werkzeuge; Whisper- und SpeechBrain-Gewichte werden beim ersten Einsatz in den lokalen Modellcache geladen.
 
-See each platform folder for detailed setup and usage notes.
+Details stehen in den plattformspezifischen README-Dateien.

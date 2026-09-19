@@ -36,14 +36,25 @@ jobs:
         shell: cmd
         run: build_windows_installer.bat
 
+      - name: Create checksums
+        working-directory: "Transcription Windows/dist"
+        shell: powershell
+        run: |
+          Get-FileHash "Transcription Windows.exe" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  Transcription Windows.exe" } | Set-Content -Encoding ascii "Transcription Windows.exe.sha256"
+          Get-FileHash "Transcription-Windows-Setup-v2.1.exe" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  Transcription-Windows-Setup-v2.1.exe" } | Set-Content -Encoding ascii "Transcription-Windows-Setup-v2.1.exe.sha256"
+
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: Transcription-Windows-exe
-          path: "Transcription Windows/dist/Transcription Windows.exe"
+          path: |
+            Transcription Windows/dist/Transcription Windows.exe
+            Transcription Windows/dist/Transcription Windows.exe.sha256
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: Transcription-Windows-Setup
-          path: "Transcription Windows/dist/Transcription-Windows-Setup-v1.0.exe"
+          path: |
+            Transcription Windows/dist/Transcription-Windows-Setup-v2.1.exe
+            Transcription Windows/dist/Transcription-Windows-Setup-v2.1.exe.sha256

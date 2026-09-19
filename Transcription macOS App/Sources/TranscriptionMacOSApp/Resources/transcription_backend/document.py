@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import html
 import json
 import os
 import re
@@ -13,7 +14,7 @@ from pathlib import Path
 from .models import SpeakerRegion, TranscriptDocument, TranscriptSegment, WordToken
 
 
-FORMATS = {"markdown": ".md", "vtt": ".vtt", "txt": ".txt", "csv": ".csv"}
+FORMATS = {"markdown": ".md", "vtt": ".vtt", "srt": ".srt", "txt": ".txt", "csv": ".csv"}
 
 
 def build_document(
@@ -23,6 +24,7 @@ def build_document(
     tokens: list[WordToken],
     regions: list[SpeakerRegion],
     include_timecodes: bool,
+    podcast: dict | None = None,
 ) -> TranscriptDocument:
     speakers = sorted({region.speaker for region in regions})
     names = {speaker: f"Sprecher {index + 1}" for index, speaker in enumerate(speakers)}
@@ -39,6 +41,7 @@ def build_document(
         speaker_names=names,
         speaker_regions=regions,
         segments=segments_from_tokens(tokens, regions),
+        podcast=normalize_podcast_metadata(podcast),
     )
 
 
@@ -132,6 +135,7 @@ def render_outputs(document: TranscriptDocument, output_dir: Path, formats: set[
     renderers = {
         "markdown": render_markdown,
         "vtt": render_vtt,
+        "srt": render_srt,
         "txt": render_txt,
         "csv": render_csv,
     }
@@ -149,6 +153,7 @@ def render_existing_outputs(document: TranscriptDocument, formats: set[str] | No
     renderers = {
         "markdown": render_markdown,
         "vtt": render_vtt,
+        "srt": render_srt,
         "txt": render_txt,
         "csv": render_csv,
     }
@@ -208,13 +213,19 @@ def render_markdown(document: TranscriptDocument) -> str:
         f"speaker_count: {len(document.speaker_names)}",
         f"speaker_model: {yaml_quote(document.speaker_model or '')}",
         f"speakers: {json.dumps(speakers, ensure_ascii=False)}",
-        "---",
-        "",
-        f"# Transkript: {Path(document.source_file).stem}",
-        "",
-        "---",
-        "",
     ]
+    if document.podcast:
+        frontmatter.append('source_type: "podcast"')
+        frontmatter.append("podcast:")
+        for key in PODCAST_YAML_FIELDS:
+            value = document.podcast.get(key)
+            if value is None or value == "" or value == []:
+                continue
+            frontmatter.append(f"  {key}: {yaml_value(value)}")
+    frontmatter.extend(["---", ""])
+    if document.podcast:
+        frontmatter.extend(podcast_markdown_block(document))
+    frontmatter.extend([f"# Transkript: {Path(document.source_file).stem}", "", "---", ""])
     blocks = []
     for segment in document.segments:
         lines = []
@@ -232,6 +243,15 @@ def render_vtt(document: TranscriptDocument) -> str:
         speaker = display_speaker(document, segment.speaker)
         text = f"{speaker}: {segment.text}" if speaker else segment.text
         lines.extend([str(index), f"{vtt_time(segment.start)} --> {vtt_time(segment.end)}", text, ""])
+    return "\n".join(lines)
+
+
+def render_srt(document: TranscriptDocument) -> str:
+    lines: list[str] = []
+    for index, segment in enumerate(document.segments, start=1):
+        speaker = display_speaker(document, segment.speaker)
+        text = f"{speaker}: {segment.text}" if speaker else segment.text
+        lines.extend([str(index), f"{srt_time(segment.start)} --> {srt_time(segment.end)}", text, ""])
     return "\n".join(lines)
 
 
@@ -255,6 +275,74 @@ def yaml_quote(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
+PODCAST_YAML_FIELDS = [
+    "feed_url",
+    "podcast_index_feed_id",
+    "show_title",
+    "episode_title",
+    "author",
+    "publisher",
+    "language",
+    "published_at",
+    "downloaded_at",
+    "episode_number",
+    "season_number",
+    "episode_type",
+    "guid",
+    "episode_url",
+    "audio_url",
+    "duration_seconds",
+    "explicit",
+    "image_url",
+    "categories",
+    "show_description",
+    "episode_description",
+]
+
+
+def yaml_value(value: object) -> str:
+    if isinstance(value, bool):
+        return str(value).lower()
+    if isinstance(value, (int, float)):
+        return str(value)
+    return json.dumps(value, ensure_ascii=False)
+
+
+def normalize_podcast_metadata(podcast: dict | None) -> dict | None:
+    if not isinstance(podcast, dict):
+        return None
+    result = {key: value for key, value in podcast.items() if key in PODCAST_YAML_FIELDS}
+    for key in ("show_description", "episode_description"):
+        value = result.get(key)
+        if isinstance(value, str):
+            result[key] = plain_text(value)
+    return result or None
+
+
+def plain_text(value: str) -> str:
+    without_tags = re.sub(r"<[^>]+>", " ", value)
+    return re.sub(r"\s+", " ", html.unescape(without_tags)).strip()
+
+
+def podcast_markdown_block(document: TranscriptDocument) -> list[str]:
+    podcast = document.podcast or {}
+    rows = [
+        ("Audiodatei", document.source_file),
+        ("Show", podcast.get("show_title")),
+        ("Episode", podcast.get("episode_title")),
+        ("Autor:in", podcast.get("author")),
+        ("Publisher", podcast.get("publisher")),
+        ("Veröffentlicht", podcast.get("published_at")),
+        ("Sprache", podcast.get("language")),
+        ("RSS-Feed", podcast.get("feed_url")),
+        ("Episodenlink", podcast.get("episode_url")),
+    ]
+    lines = ["## Podcast", ""]
+    lines.extend(f"- **{label}:** {value}" for label, value in rows if value is not None and value != "")
+    lines.extend(["", "---", ""])
+    return lines
+
+
 def fps_timecode(seconds: float, fps: int = 25) -> str:
     total = int(round(max(0.0, seconds) * fps))
     hours, total = divmod(total, 3600 * fps)
@@ -269,6 +357,10 @@ def vtt_time(seconds: float) -> str:
     minutes, millis = divmod(millis, 60_000)
     secs, millis = divmod(millis, 1000)
     return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
+
+
+def srt_time(seconds: float) -> str:
+    return vtt_time(seconds).replace(".", ",")
 
 
 def csv_time(seconds: float) -> str:

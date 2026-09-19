@@ -24,8 +24,9 @@ class TranscriptSegment:
     id: str
     start: float
     end: float
-    speaker: str | None
     text: str
+    speaker: str | None = None
+    language: str | None = None
 
 
 @dataclass
@@ -46,6 +47,7 @@ class TranscriptDocument:
     speaker_regions: list[SpeakerRegion] = field(default_factory=list)
     segments: list[TranscriptSegment] = field(default_factory=list)
     outputs: dict[str, str] = field(default_factory=dict)
+    podcast: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -54,6 +56,9 @@ class TranscriptDocument:
     def from_dict(cls, data: dict[str, Any]) -> "TranscriptDocument":
         data = dict(data)
         data["speaker_regions"] = [SpeakerRegion(**item) for item in data.get("speaker_regions", [])]
+        # Ältere Swift-Dokumente ließen optionale Werte wie `speaker` beim
+        # Kodieren vollständig aus. Diese Bearbeitungsstände müssen weiterhin
+        # für Begriffsanalyse und erneuten Export lesbar bleiben.
         data["segments"] = [TranscriptSegment(**item) for item in data.get("segments", [])]
         return cls(**data)
 
