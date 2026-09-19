@@ -10,6 +10,12 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 if errorlevel 1 goto error
 
+python scripts\prepare_ffmpeg.py
+if errorlevel 1 goto error
+
+python scripts\prepare_deno.py
+if errorlevel 1 goto error
+
 echo.
 echo Installation complete.
 echo Start the app with run_windows_app.bat.
@@ -19,6 +25,6 @@ exit /b 0
 :error
 echo.
 echo Installation failed.
-echo Make sure Python 3.10+ and ffmpeg are installed and available on PATH.
+echo Make sure Python 3.10+ is installed and an internet connection is available.
 pause
 exit /b 1

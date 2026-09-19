@@ -1,11 +1,18 @@
 import Foundation
 
 enum TranscriptLanguage: String, CaseIterable, Identifiable, Codable {
+    case mixed = "auto"
     case german = "de"
     case english = "en"
 
     var id: String { rawValue }
-    var title: String { self == .german ? "Deutsch" : "English" }
+    var title: String {
+        switch self {
+        case .mixed: return "Deutsch + Englisch (automatisch)"
+        case .german: return "Deutsch"
+        case .english: return "English"
+        }
+    }
 }
 
 enum WhisperModel: String, CaseIterable, Identifiable, Codable {
@@ -50,16 +57,16 @@ enum SeparationPreset: String, CaseIterable, Identifiable, Codable {
     var id: String { rawValue }
     var threshold: Double {
         switch self {
-        case .loose: return 0.70
-        case .normal: return 0.50
-        case .strict: return 0.35
-        case .veryStrict: return 0.25
+        case .loose: return 0.78
+        case .normal: return 0.60
+        case .strict: return 0.45
+        case .veryStrict: return 0.30
         }
     }
     var title: String {
         switch self {
         case .loose: return "Locker – ähnliche Stimmen zusammen"
-        case .normal: return "Normal"
+        case .normal: return "Normal – ähnliche Stimmen eher zusammen"
         case .strict: return "Streng – mehr Trennung"
         case .veryStrict: return "Sehr streng"
         }
@@ -67,14 +74,69 @@ enum SeparationPreset: String, CaseIterable, Identifiable, Codable {
 }
 
 enum OutputFormat: String, CaseIterable, Identifiable, Codable {
-    case markdown, vtt, txt, csv
+    case markdown, vtt, srt, txt, csv
     var id: String { rawValue }
     var title: String { rawValue == "markdown" ? "Markdown" : rawValue.uppercased() }
 }
 
-struct SelectedMediaFile: Identifiable, Hashable {
-    let id = UUID()
+struct PodcastMetadata: Codable, Hashable {
+    var feedURL: String
+    var podcastIndexFeedID: Int?
+    var showTitle: String
+    var episodeTitle: String
+    var author: String?
+    var publisher: String?
+    var language: String?
+    var publishedAt: String?
+    var downloadedAt: String
+    var episodeNumber: Int?
+    var seasonNumber: Int?
+    var episodeType: String?
+    var guid: String?
+    var episodeURL: String?
+    var audioURL: String
+    var durationSeconds: Int?
+    var explicit: Bool?
+    var imageURL: String?
+    var categories: [String]
+    var showDescription: String?
+    var episodeDescription: String?
+    var rawShowDescription: String? = nil
+    var rawEpisodeDescription: String? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case author, publisher, language, guid, explicit, categories
+        case feedURL = "feed_url"
+        case podcastIndexFeedID = "podcast_index_feed_id"
+        case showTitle = "show_title"
+        case episodeTitle = "episode_title"
+        case publishedAt = "published_at"
+        case downloadedAt = "downloaded_at"
+        case episodeNumber = "episode_number"
+        case seasonNumber = "season_number"
+        case episodeType = "episode_type"
+        case episodeURL = "episode_url"
+        case audioURL = "audio_url"
+        case durationSeconds = "duration_seconds"
+        case imageURL = "image_url"
+        case showDescription = "show_description"
+        case episodeDescription = "episode_description"
+        case rawShowDescription = "raw_show_description"
+        case rawEpisodeDescription = "raw_episode_description"
+    }
+}
+
+struct SelectedMediaFile: Identifiable, Hashable, Codable {
+    let id: UUID
     let url: URL
+    var podcastMetadata: PodcastMetadata?
+
+    init(id: UUID = UUID(), url: URL, podcastMetadata: PodcastMetadata? = nil) {
+        self.id = id
+        self.url = url
+        self.podcastMetadata = podcastMetadata
+    }
+
     var name: String { url.lastPathComponent }
     var folder: String { url.deletingLastPathComponent().path }
 }
@@ -124,15 +186,15 @@ struct RunnerEvent: Decodable {
 }
 
 struct TranscriptionResult: Identifiable, Equatable {
-    let id = UUID()
+    var id: String { documentURL.standardizedFileURL.path }
     let sourceURL: URL
     let documentURL: URL
     var outputs: [String: String]
-    let speakerCount: Int
-    let segmentCount: Int
+    var speakerCount: Int
+    var segmentCount: Int
 }
 
-struct TranscriptDocument: Codable, Identifiable {
+struct TranscriptDocument: Codable, Identifiable, Equatable {
     var id: String
     var sourcePath: String
     var sourceFile: String
@@ -149,9 +211,10 @@ struct TranscriptDocument: Codable, Identifiable {
     var speakerRegions: [SpeakerRegion]
     var segments: [TranscriptSegment]
     var outputs: [String: String]
+    var podcast: PodcastMetadata? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, language, model, device, engine, created, timecodes, diarization, segments, outputs
+        case id, language, model, device, engine, created, timecodes, diarization, segments, outputs, podcast
         case sourcePath = "source_path"
         case sourceFile = "source_file"
         case fpsTimecode = "fps_timecode"
@@ -173,6 +236,7 @@ struct TranscriptSegment: Codable, Identifiable, Hashable {
     var end: Double
     var speaker: String?
     var text: String
+    var language: String? = nil
 }
 
 struct GlossaryCandidate: Codable, Identifiable, Hashable {

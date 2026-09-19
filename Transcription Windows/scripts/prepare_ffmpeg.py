@@ -11,23 +11,23 @@ from pathlib import Path
 FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 
 
-def find_ffmpeg_exe(root: Path) -> Path:
-    matches = sorted(root.glob("**/bin/ffmpeg.exe"))
+def find_tool(root: Path, name: str) -> Path:
+    matches = sorted(root.glob(f"**/bin/{name}.exe"))
     if not matches:
-        raise FileNotFoundError("ffmpeg.exe was not found in the downloaded archive.")
+        raise FileNotFoundError(f"{name}.exe was not found in the downloaded archive.")
     return matches[0]
 
 
 def main() -> int:
     project_dir = Path(__file__).resolve().parents[1]
     vendor_dir = project_dir / "vendor" / "ffmpeg"
-    ffmpeg_exe = vendor_dir / "ffmpeg.exe"
+    tool_names = ("ffmpeg", "ffprobe", "ffplay")
     cache_dir = project_dir / ".cache" / "ffmpeg"
     archive_path = cache_dir / "ffmpeg-release-essentials.zip"
     extract_dir = cache_dir / "extract"
 
-    if ffmpeg_exe.exists():
-        print(f"ffmpeg already prepared: {ffmpeg_exe}")
+    if all((vendor_dir / f"{name}.exe").exists() for name in tool_names):
+        print(f"FFmpeg tools already prepared: {vendor_dir}")
         return 0
 
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -45,9 +45,10 @@ def main() -> int:
     with zipfile.ZipFile(archive_path) as archive:
         archive.extractall(extract_dir)
 
-    source_exe = find_ffmpeg_exe(extract_dir)
-    shutil.copy2(source_exe, ffmpeg_exe)
-    print(f"Prepared bundled ffmpeg: {ffmpeg_exe}")
+    for name in tool_names:
+        destination = vendor_dir / f"{name}.exe"
+        shutil.copy2(find_tool(extract_dir, name), destination)
+        print(f"Prepared bundled tool: {destination}")
     return 0
 
 

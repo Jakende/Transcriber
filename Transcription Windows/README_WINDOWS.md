@@ -1,80 +1,76 @@
 # Transcription Windows
 
-Windows-optimierte Desktop-App fuer lokale Audio- und Video-Transkription mit OpenAI Whisper.
+Windows-Desktop-App für lokale Audio- und Video-Transkription mit dem Funktionsumfang der nativen macOS-App.
 
-## Voraussetzungen
+## Funktionen
 
-- Windows 10 oder neuer
-- Python 3.10 oder neuer
-- Internet beim ersten Modell-Download
+- Persistente Warteschlange per Dateiauswahl oder Drag-and-drop
+- Direkter Import ausgewählter Podcast-Folgen aus RSS und PodcastIndex
+- Download einzelner YouTube-Videos als MP3, optional zusätzlich als Video
+- Deutsch, Englisch und automatische Erkennung gemischtsprachiger Aufnahmen
+- Whisper Small, Medium und Large-v3-Turbo
+- Optionale Sprechererkennung mit automatischer oder begrenzter Sprecherzahl
+- Sprecher-Hörproben, frei benennbare Sprecher:innen und Zusammenführen falsch getrennter Stimmen
+- Transkript-Editor mit Suche, Teilen, Verbinden und Löschen von Segmenten
+- Audio-Wiedergabe mit Schleife, Sprüngen und variabler Geschwindigkeit
+- Rückgängig/Wiederholen, automatische Sicherungsversionen und wiederhergestellte Ergebnisbibliothek
+- Ergebnis-Suche, Archiv und Papierkorb-Aktion für interne Bearbeitungsstände
+- Persistentes Wörterbuch als Whisper-Kontext und zweisprachige Begriffsprüfung mit spaCy
+- Abschnittsweise DE/EN-Kennzeichnung
+- Import vorhandener VTT-Dateien mit optionaler Mediendatei
+- Markdown-, VTT-, SRT-, TXT- und CSV-Ausgabe ohne stilles Überschreiben
+- Obsidian-kompatibles YAML-Frontmatter einschließlich Podcast-Metadaten
+- Strukturierter Fortschritt, Abbruchanforderung und isolierte Fehler pro Datei
+- Systembericht für Laufzeit, Modelle und gebündelte Werkzeuge
 
 ## Installation
 
-Fuer normale Nutzer: den fertigen Setup Wizard `Transcription-Windows-Setup-v1.0.exe` aus dem GitHub-Release herunterladen und ausfuehren. Der Installer richtet die App im Startmenue ein und kann optional eine Desktop-Verknuepfung anlegen.
+Für normale Nutzer:innen: `Transcription-Windows-Setup-v2.1.exe` aus dem GitHub-Release laden und ausführen. Der Installer richtet die App im Startmenü ein und kann optional eine Desktop-Verknüpfung anlegen.
 
-Fuer lokale Entwicklung:
+Für lokale Entwicklung werden Windows 10 oder neuer sowie Python 3.10+ benötigt:
 
-1. `install_windows.bat` doppelklicken.
-2. Danach `run_windows_app.bat` doppelklicken.
+```bat
+install_windows.bat
+run_windows_app.bat
+```
+
+Die Release-App bündelt Python-Abhängigkeiten, FFmpeg, FFprobe, FFplay, Deno und yt-dlp. Whisper- und SpeechBrain-Modellgewichte werden bei ihrer ersten Nutzung nach `%LOCALAPPDATA%\Transcription Windows\models` geladen und anschließend lokal wiederverwendet. Der erste Modellstart benötigt daher eine Internetverbindung.
 
 ## Bedienung
 
-1. Dateien auswaehlen.
-2. Sprache auswaehlen: `de` oder `en`.
-3. Whisper/Wispr Modell auswaehlen, Standard ist `large`.
-4. Auswaehlen, ob Timecodes in das Markdown geschrieben werden sollen.
-5. Optional Zielordner festlegen.
-6. `Transkription starten` klicken.
+1. Dateien hinzufügen, per Drag-and-drop ablegen, VTT importieren oder Medien laden.
+2. Sprache, Whisper-Modell, Sprecherbereich, Trennung und Ausgabeformate einstellen.
+3. Optional einen gemeinsamen Zielordner wählen.
+4. `Transkription starten` wählen.
+5. Fertige Ergebnisse über `Bearbeiten` nachbearbeiten oder neu exportieren.
 
-Die App transkribiert alle Dateien nacheinander und wartet zwischen Dateien den eingestellten Buffer ab.
+Bei Videodateien wird gezielt die erste Audiospur verarbeitet. Dateien ohne Audiospur werden übersprungen und im Aktivitätsprotokoll ausgewiesen.
 
-## Ausgabe
-
-Pro Quelldatei entsteht eine Markdown-Datei mit:
-
-- Obsidian-kompatiblem YAML Front Matter
-- `created` als Datum der Transkription
-- `model`
-- `device`
-- `source_file`
-- `fps_timecode`
-- `timecodes`
-- optional timecodierten Segmenten
-
-## App Icon
-
-The Windows build uses `assets\AppIcon.ico`, generated from the same black-and-white speaking smiley icon style as the macOS app:
-
-```bat
-python scripts\generate_windows_icon.py assets\AppIcon.ico
-```
-
-## EXE bauen
-
-Der EXE-Build erstellt bei Bedarf eine lokale `.venv`, installiert `torch`, `openai-whisper` und PyInstaller aus `requirements.txt`, erzeugt das Icon, laedt FFmpeg und buendelt die Python-Abhaengigkeiten plus `ffmpeg.exe` in die `.exe`:
+## EXE und Installer bauen
 
 ```bat
 build_windows_exe.bat
-```
-
-Der Installer-Build verwendet danach Inno Setup:
-
-```bat
 build_windows_installer.bat
 ```
 
-Die Dateien liegen danach unter:
+Der EXE-Build installiert die gepinnten Abhängigkeiten, erzeugt das App-Icon, lädt und prüft FFmpeg sowie Deno, bündelt die gemeinsame Transkriptionslogik und führt anschließend einen Smoke-Test der fertigen EXE aus. Der Installer-Build verwendet Inno Setup.
+
+Die lokalen Standardausgaben sind:
 
 ```text
 dist\Transcription Windows.exe
-dist\Transcription-Windows-Setup-v1.0.exe
+dist\Transcription-Windows-Setup-v2.1.exe
 ```
 
-## Hinweise
+CUDA wird automatisch verwendet, wenn eine kompatible NVIDIA-GPU und die mitgelieferte Torch-Version sie nutzen können; andernfalls läuft die Transkription auf der CPU.
 
-- CUDA wird auf Windows automatisch genutzt, wenn eine kompatible NVIDIA-GPU und passende Torch-Installation vorhanden sind.
-- Ohne CUDA laeuft die App auf CPU.
-- Die gebaute `.exe` enthaelt `torch` und `openai-whisper`; Nutzer muessen diese Pakete fuer die EXE nicht separat installieren.
-- Die gebaute `.exe` enthaelt auch `ffmpeg.exe`; Nutzer muessen FFmpeg fuer die EXE nicht separat installieren.
-- Whisper-Modelle werden beim ersten Start je nach Modellgroesse in `%LOCALAPPDATA%\Transcription Windows\models` heruntergeladen und danach wiederverwendet.
-- FFmpeg Windows builds are downloaded from gyan.dev during the build. Review the FFmpeg/GPL licensing terms before distributing release binaries.
+## Tests
+
+Vom Repository-Stamm aus:
+
+```bat
+python -m py_compile "Transcription Windows\transcription_windows_app.py" "Transcription Windows\windows_services.py"
+python -m unittest tests.test_windows_services tests.test_windows_safe_streams
+```
+
+Lizenz- und Quellenhinweise stehen in `..\NOTICE` und `..\THIRD-PARTY-LICENSES.md`.

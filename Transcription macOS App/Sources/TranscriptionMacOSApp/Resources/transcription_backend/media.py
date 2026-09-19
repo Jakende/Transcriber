@@ -56,12 +56,15 @@ def transcribe_words(
     language: str,
     output_prefix: Path,
     progress: ProgressCallback,
+    prompt_text: str | None = None,
 ) -> list[WordToken]:
     command = [
         str(whisper_cli), "-m", str(model_path), "-l", language,
         "-f", str(wav_path), "-ojf", "-sow", "-of", str(output_prefix),
         "--print-progress",
     ]
+    if prompt_text:
+        command.extend(["--prompt", prompt_text, "--carry-initial-prompt"])
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,

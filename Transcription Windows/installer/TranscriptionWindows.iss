@@ -1,5 +1,10 @@
 #define MyAppName "Transcription Windows"
-#define MyAppVersion "1.0"
+#ifndef MyAppVersion
+  #define MyAppVersion "2.1"
+#endif
+#ifndef MyOutputBaseFilename
+  #define MyOutputBaseFilename "Transcription-Windows-Setup-v2.1"
+#endif
 #define MyAppPublisher "Jakende"
 #define MyAppExeName "Transcription Windows.exe"
 
@@ -12,7 +17,7 @@ DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=no
 OutputDir=..\dist
-OutputBaseFilename=Transcription-Windows-Setup-v1.0
+OutputBaseFilename={#MyOutputBaseFilename}
 SetupIconFile=..\assets\AppIcon.ico
 Compression=lzma2
 SolidCompression=yes
@@ -24,9 +29,10 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "german"; MessagesFile: "compiler:Languages\German.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
 Source: "..\dist\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion

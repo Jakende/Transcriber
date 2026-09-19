@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Der eingebettete Python-Interpreter darf den reproduzierbaren Ressourcen-Cache
+# nicht durch Laufzeit-Bytecode vergrößern oder später die App-Signatur ändern.
+export PYTHONDONTWRITEBYTECODE=1
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CACHE_DIR="${ROOT_DIR}/.bundle-cache"
 DOWNLOAD_DIR="${CACHE_DIR}/downloads"
@@ -18,6 +22,10 @@ WHISPER_TAG="v1.9.1"
 WHISPER_COMMIT="f049fff95a089aa9969deb009cdd4892b3e74916"
 FFMPEG_URL="https://github.com/eugeneware/ffmpeg-static/releases/download/b6.1.1/ffmpeg-darwin-arm64.gz"
 FFMPEG_SHA256="8923876afa8db5585022d7860ec7e589af192f441c56793971276d450ed3bbfa"
+DENO_VERSION="2.9.6"
+DENO_ARCHIVE="deno-aarch64-apple-darwin-${DENO_VERSION}.zip"
+DENO_URL="https://github.com/denoland/deno/releases/download/v${DENO_VERSION}/deno-aarch64-apple-darwin.zip"
+DENO_SHA256="213a2f304f04d3c9cb5220669afad138f60a5aab1fe80962abdeb8f35807a472"
 MODEL_REVISION="5359861c739e955e79d9a303bcbc70fb988958b1"
 
 if [[ "$(uname -m)" != "arm64" ]]; then
@@ -52,7 +60,7 @@ download_model() {
 }
 
 download_verified "${PYTHON_URL}" "${DOWNLOAD_DIR}/${PYTHON_ARCHIVE}" "${PYTHON_SHA256}"
-if [[ ! -x "${RUNTIME_DIR}/bin/python3" ]]; then
+if [[ ! -x "${RUNTIME_DIR}/bin/python3" ]] || ! "${RUNTIME_DIR}/bin/python3" --version >/dev/null 2>&1; then
   rm -rf "${RUNTIME_DIR}"
   mkdir -p "${RUNTIME_DIR}"
   tar -xzf "${DOWNLOAD_DIR}/${PYTHON_ARCHIVE}" -C "${RUNTIME_DIR}" --strip-components=1
@@ -87,6 +95,10 @@ download_verified "${FFMPEG_URL}" "${DOWNLOAD_DIR}/ffmpeg-darwin-arm64.gz" "${FF
 gzip -dc "${DOWNLOAD_DIR}/ffmpeg-darwin-arm64.gz" > "${BIN_DIR}/ffmpeg"
 chmod +x "${BIN_DIR}/ffmpeg"
 
+download_verified "${DENO_URL}" "${DOWNLOAD_DIR}/${DENO_ARCHIVE}" "${DENO_SHA256}"
+unzip -oq "${DOWNLOAD_DIR}/${DENO_ARCHIVE}" -d "${BIN_DIR}"
+chmod +x "${BIN_DIR}/deno"
+
 if [[ ! -f "${SPEAKER_MODEL_DIR}/hyperparams.yaml" ]]; then
   rm -rf "${SPEAKER_MODEL_DIR}.new"
   HF_HOME="${CACHE_DIR}/huggingface" "${RUNTIME_DIR}/bin/python3" - "${SPEAKER_MODEL_DIR}.new" <<'PY'
@@ -118,5 +130,7 @@ EncoderClassifier.from_hparams(source=sys.argv[1], savedir=sys.argv[1], run_opts
 PY
 "${BIN_DIR}/whisper-cli" --help >/dev/null
 "${BIN_DIR}/ffmpeg" -version >/dev/null
+"${BIN_DIR}/deno" --version >/dev/null
+"${RUNTIME_DIR}/bin/python3" -m yt_dlp --version >/dev/null
 
 echo "Offline-Ressourcen vorbereitet: ${RESOURCE_DIR}"

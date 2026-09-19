@@ -10,17 +10,39 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, for example v1.0"
+        description: "Release tag, for example v2.1"
         required: true
-        default: "v2.0"
+        default: "v2.1"
 
 permissions:
   contents: write
 
 jobs:
+  validate:
+    name: Validate shared sources
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile Python sources
+        run: |
+          python -m py_compile "Transcription Windows/transcription_windows_app.py" "Transcription Windows/windows_services.py"
+          python -m py_compile "Transcription macOS App/Sources/TranscriptionMacOSApp/Resources/transcribe_bulk.py" "Transcription macOS App/Sources/TranscriptionMacOSApp/Resources/transcription_backend/"*.py
+
+      - name: Run dependency-light regression tests
+        run: python -m unittest tests/test_macos_transcription_backend.py tests/test_windows_services.py tests/test_windows_safe_streams.py
+
   build-macos:
     name: Build macOS App
     runs-on: macos-15
+    needs: validate
 
     steps:
       - name: Check out repository
@@ -29,6 +51,10 @@ jobs:
       - name: Build app bundle
         working-directory: "Transcription macOS App"
         run: ./script/build_and_run.sh --bundle --no-run
+
+      - name: Verify bundled runtime and models
+        working-directory: "Transcription macOS App"
+        run: ./script/verify_app_bundle.sh "dist/Transcription macOS.app"
 
       - name: Package app bundle
         working-directory: "Transcription macOS App/dist"
@@ -50,6 +76,7 @@ jobs:
   build-windows:
     name: Build Windows EXE
     runs-on: windows-latest
+    needs: validate
 
     steps:
       - name: Check out repository
@@ -74,13 +101,23 @@ jobs:
         shell: cmd
         run: build_windows_installer.bat
 
+      - name: Add release tag and checksums to Windows assets
+        working-directory: "Transcription Windows/dist"
+        shell: powershell
+        run: |
+          Copy-Item "Transcription Windows.exe" "Transcription-Windows-${env:RELEASE_TAG}.exe"
+          Get-FileHash "Transcription-Windows-${env:RELEASE_TAG}.exe" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  Transcription-Windows-${env:RELEASE_TAG}.exe" } | Set-Content -Encoding ascii "Transcription-Windows-${env:RELEASE_TAG}.exe.sha256"
+          Get-FileHash "Transcription-Windows-Setup-${env:RELEASE_TAG}.exe" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  Transcription-Windows-Setup-${env:RELEASE_TAG}.exe" } | Set-Content -Encoding ascii "Transcription-Windows-Setup-${env:RELEASE_TAG}.exe.sha256"
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: Transcription-Windows
           path: |
-            Transcription Windows/dist/Transcription Windows.exe
-            Transcription Windows/dist/Transcription-Windows-Setup-v1.0.exe
+            Transcription Windows/dist/Transcription-Windows-${{ env.RELEASE_TAG }}.exe
+            Transcription Windows/dist/Transcription-Windows-${{ env.RELEASE_TAG }}.exe.sha256
+            Transcription Windows/dist/Transcription-Windows-Setup-${{ env.RELEASE_TAG }}.exe
+            Transcription Windows/dist/Transcription-Windows-Setup-${{ env.RELEASE_TAG }}.exe.sha256
 
   release:
     name: Publish GitHub Release
@@ -106,15 +143,17 @@ jobs:
 
             Assets:
             - macOS SwiftUI app bundle (`Transcription-macOS-${{ env.RELEASE_TAG }}.zip.part-*`)
-            - Windows setup wizard (`Transcription-Windows-Setup-v1.0.exe`)
-            - Windows standalone executable (`Transcription Windows.exe`) with torch, openai-whisper, and ffmpeg bundled
+            - Windows setup wizard (`Transcription-Windows-Setup-${{ env.RELEASE_TAG }}.exe`)
+            - Windows standalone executable (`Transcription-Windows-${{ env.RELEASE_TAG }}.exe`)
 
             Notes:
             - The Apple-Silicon macOS app contains its Python runtime, ffmpeg, whisper.cpp, speaker models, language models, and Whisper Small/Medium/Turbo weights for offline use.
             - Reassemble the macOS archive with `cat Transcription-macOS-${{ env.RELEASE_TAG }}.zip.part-* > Transcription-macOS-${{ env.RELEASE_TAG }}.zip`, then verify it with the supplied SHA-256 file.
-            - The Windows EXE includes FFmpeg from gyan.dev; review FFmpeg licensing terms before redistribution.
+            - The Windows EXE contains FFmpeg/FFprobe/FFplay, Deno, yt-dlp, the speaker and glossary runtimes, and all application features. Whisper and SpeechBrain model weights are downloaded to the local app-data cache on first use and then remain available locally.
           files: |
             release-assets/Transcription-macOS/Transcription-macOS-${{ env.RELEASE_TAG }}.zip.part-*
             release-assets/Transcription-macOS/Transcription-macOS-${{ env.RELEASE_TAG }}.zip.sha256
-            release-assets/Transcription-Windows/Transcription-Windows-Setup-v1.0.exe
-            release-assets/Transcription-Windows/Transcription Windows.exe
+            release-assets/Transcription-Windows/Transcription-Windows-${{ env.RELEASE_TAG }}.exe
+            release-assets/Transcription-Windows/Transcription-Windows-${{ env.RELEASE_TAG }}.exe.sha256
+            release-assets/Transcription-Windows/Transcription-Windows-Setup-${{ env.RELEASE_TAG }}.exe
+            release-assets/Transcription-Windows/Transcription-Windows-Setup-${{ env.RELEASE_TAG }}.exe.sha256

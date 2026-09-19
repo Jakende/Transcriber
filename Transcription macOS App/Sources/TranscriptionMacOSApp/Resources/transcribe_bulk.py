@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -38,13 +39,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mode", choices=["transcribe", "render", "glossary"], default="transcribe")
     parser.add_argument("--file", action="append")
     parser.add_argument("--document")
-    parser.add_argument("--language", choices=["de", "en"], default="de")
+    parser.add_argument("--language", choices=["auto", "de", "en"], default="de")
     parser.add_argument("--model", choices=sorted(MODEL_FILES), default="turbo")
     parser.add_argument("--diarize", action="store_true")
     parser.add_argument("--speaker-range", default="auto")
     parser.add_argument("--cluster-threshold", type=float, default=0.5)
     parser.add_argument("--timecodes", action="store_true")
-    parser.add_argument("--format", action="append", dest="formats", choices=["markdown", "vtt", "txt", "csv"])
+    parser.add_argument("--format", action="append", dest="formats", choices=["markdown", "vtt", "srt", "txt", "csv"])
     parser.add_argument("--output-dir")
     parser.add_argument("--state-dir")
     parser.add_argument("--resource-root")
@@ -53,6 +54,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--models-dir")
     parser.add_argument("--speaker-models-dir")
     parser.add_argument("--replace", action="append", default=[], help="Begriffsersetzung als Quelle=Ziel")
+    parser.add_argument("--prompt", help="Kontext mit bestätigten Namen und Fachbegriffen")
+    parser.add_argument("--source-metadata-file", help="Temporäre JSON-Datei mit Podcast-Metadaten nach Quellpfad")
     return parser.parse_args()
 
 
@@ -87,6 +90,16 @@ def run_transcription(args: argparse.Namespace) -> int:
     formats = set(args.formats or ["markdown"])
     minimum, maximum = parse_speaker_range(args.speaker_range)
     succeeded = 0
+    source_metadata = {}
+    if args.source_metadata_file:
+        metadata_path = Path(args.source_metadata_file).expanduser().resolve()
+        try:
+            loaded = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError(f"Podcast-Metadaten konnten nicht gelesen werden: {error}") from error
+        if not isinstance(loaded, dict):
+            raise ValueError("Podcast-Metadaten müssen nach Quellpfad geordnet sein.")
+        source_metadata = loaded
     emit("started", file_count=len(args.file), model=args.model, language=args.language)
 
     for file_index, raw_path in enumerate(args.file):
@@ -134,9 +147,18 @@ def run_transcription(args: argparse.Namespace) -> int:
                     args.language,
                     work / "whisper",
                     on_whisper_progress,
+                    args.prompt,
                 )
                 emit("progress", file_id=file_id, source_path=str(source), stage="merge", percent=88, message="Führe Text und Sprecher zusammen …")
-                document = build_document(source, args.language, args.model, tokens, regions, args.timecodes)
+                document = build_document(
+                    source,
+                    args.language,
+                    args.model,
+                    tokens,
+                    regions,
+                    args.timecodes,
+                    podcast=source_metadata.get(str(source)) or source_metadata.get(str(Path(raw_path).expanduser())),
+                )
                 target = Path(args.output_dir).expanduser().resolve() if args.output_dir else source.parent
                 outputs = render_outputs(document, target, formats)
                 document_path = write_document(document, state_dir)

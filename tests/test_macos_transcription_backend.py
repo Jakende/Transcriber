@@ -21,11 +21,17 @@ from transcription_backend.document import (  # noqa: E402
     render_csv,
     render_markdown,
     render_outputs,
+    read_document,
+    render_srt,
     render_vtt,
     segments_from_tokens,
 )
 from transcription_backend.media import coalesce_word_tokens, normalization_error, parse_timestamp  # noqa: E402
-from transcription_backend.glossary import iter_text_chunks, merge_candidate_counts  # noqa: E402
+from transcription_backend.glossary import (  # noqa: E402
+    iter_text_chunks,
+    merge_candidate_counts,
+    merge_language_candidates,
+)
 from transcription_backend.models import SpeakerRegion, WordToken  # noqa: E402
 from collections import Counter
 
@@ -87,6 +93,7 @@ class TranscriptionDocumentTests(unittest.TestCase):
         self.assertIn("diarization: true", markdown)
         self.assertIn("**Sprecher 1:**", markdown)
         self.assertIn("WEBVTT", render_vtt(document))
+        self.assertIn("00:00:00,000 --> 00:00:01,000", render_srt(document))
         self.assertIn("speaker", render_csv(document).splitlines()[0])
 
     def test_replacements_use_word_boundaries(self):
@@ -102,11 +109,34 @@ class TranscriptionDocumentTests(unittest.TestCase):
         self.assertEqual(merged[0]["count"], 6)
         self.assertEqual(set(merged[0]["kind"].split(" / ")), {"PER", "PROPN", "ORG"})
 
+    def test_multilingual_glossary_does_not_double_count_terms(self):
+        merged = merge_language_candidates([
+            [{"term": "OpenAI", "count": 2, "kind": "ORG"}],
+            [{"term": "OpenAI", "count": 2, "kind": "PROPN"}],
+        ])
+        self.assertEqual(merged, [{"term": "OpenAI", "count": 2, "kind": "ORG / PROPN"}])
+
     def test_glossary_chunks_long_text_without_losing_content(self):
         text = ("Ein langer Satz mit Fachbegriff. " * 8).strip()
         chunks = list(iter_text_chunks(text, max_characters=60))
         self.assertGreater(len(chunks), 1)
         self.assertEqual(" ".join(chunks), text)
+
+    def test_old_document_without_optional_speaker_remains_readable(self):
+        payload = {
+            "id": "legacy",
+            "source_path": "/tmp/legacy.mp3",
+            "source_file": "legacy.mp3",
+            "language": "de",
+            "model": "turbo",
+            "segments": [{"id": "one", "start": 0.0, "end": 1.0, "text": "OpenAI in Berlin"}],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.transcript.json"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            document = read_document(path)
+        self.assertIsNone(document.segments[0].speaker)
+        self.assertEqual(document.segments[0].text, "OpenAI in Berlin")
 
     def test_output_collision_gets_suffix_and_document_is_serializable(self):
         document = build_document(Path("/tmp/a.wav"), "de", "small", [WordToken(0, 1, " Text")], [], False)
@@ -117,6 +147,37 @@ class TranscriptionDocumentTests(unittest.TestCase):
             self.assertEqual(Path(outputs["markdown"]).name, "a_2.md")
             self.assertTrue(Path(outputs["vtt"]).exists())
             json.dumps(document.to_dict(), ensure_ascii=False)
+
+    def test_podcast_metadata_is_only_added_to_markdown(self):
+        podcast = {
+            "feed_url": "https://example.org/feed.xml",
+            "podcast_index_feed_id": 12345,
+            "show_title": 'Show: "Spezial"',
+            "episode_title": "Folge 42",
+            "author": "Autorin",
+            "language": "de",
+            "published_at": "2026-09-15T08:00:00Z",
+            "downloaded_at": "2026-09-15T10:00:00Z",
+            "explicit": False,
+            "categories": ["Planung", "Klima"],
+            "show_description": "<p>Eine <b>Show</b></p>",
+            "episode_description": "Episode &amp; Inhalt",
+            "episode_url": "https://example.org/folge-42",
+            "audio_url": "https://cdn.example.org/folge-42.mp3",
+        }
+        document = build_document(Path("/tmp/2026-09-15 – Show – Folge 42.mp3"), "de", "turbo", [WordToken(0, 1, " Text")], [], True, podcast=podcast)
+        markdown = render_markdown(document)
+        self.assertIn('source_type: "podcast"', markdown)
+        self.assertIn("podcast:\n  feed_url:", markdown)
+        self.assertIn('  show_title: "Show: \\"Spezial\\""', markdown)
+        self.assertIn("  explicit: false", markdown)
+        self.assertIn('  categories: ["Planung", "Klima"]', markdown)
+        self.assertIn('  show_description: "Eine Show"', markdown)
+        self.assertIn("## Podcast", markdown)
+        self.assertIn("**Audiodatei:** 2026-09-15 – Show – Folge 42.mp3", markdown)
+        self.assertNotIn("source_type", render_vtt(document))
+        self.assertNotIn("Podcast", render_srt(document))
+        self.assertNotIn("Podcast", render_csv(document))
 
 
 if __name__ == "__main__":
