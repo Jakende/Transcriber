@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import shutil
 import urllib.request
 import zipfile
@@ -10,9 +11,6 @@ from pathlib import Path
 
 DENO_VERSION = "2.9.6"
 DENO_URL = f"https://github.com/denoland/deno/releases/download/v{DENO_VERSION}/deno-x86_64-pc-windows-msvc.zip"
-DENO_SHA256 = ""  # The release workflow verifies the downloaded archive against GitHub's checksum file.
-
-
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -38,7 +36,11 @@ def main() -> int:
         urllib.request.urlretrieve(DENO_URL, archive)
     checksum_url = f"{DENO_URL}.sha256sum"
     urllib.request.urlretrieve(checksum_url, checksum_file)
-    expected = checksum_file.read_text(encoding="utf-8").split()[0].casefold()
+    checksum_text = checksum_file.read_text(encoding="utf-8-sig")
+    matches = re.findall(r"(?i)\b[0-9a-f]{64}\b", checksum_text)
+    if not matches:
+        raise RuntimeError("Deno checksum file does not contain a SHA-256 value.")
+    expected = matches[0].casefold()
     actual = sha256(archive)
     if expected != actual:
         archive.unlink(missing_ok=True)
