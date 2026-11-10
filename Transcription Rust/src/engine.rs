@@ -335,9 +335,8 @@ pub fn select_device(cpu: bool) -> Result<Device> {
         return Ok(Device::Cpu);
     }
     #[cfg(feature = "metal")]
-    if candle_core::utils::metal_is_available() {
-        return Device::new_metal(0)
-            .context("Metal konnte nicht gestartet werden. CPU-Modus verwenden.");
+    if let Ok(device) = Device::new_metal(0) {
+        return Ok(device);
     }
     Ok(Device::Cpu)
 }
