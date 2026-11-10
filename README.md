@@ -5,7 +5,11 @@
 
 Local audio and video transcription for macOS and Windows. Transcriber combines Whisper transcription, optional speaker diarization, a transcript editor, podcast and YouTube import, and Obsidian-ready exports in native desktop apps.
 
-## Rust macOS application
+## Rust macOS application — Work in progress
+
+**The Rust rewrite is work in progress and is not yet fully working. The existing
+macOS (Swift/Python) and Windows applications are the fully working versions.
+Use the stable releases for everyday work.**
 
 The independent [Rust macOS application](Transcription%20Rust/README.md) lives in
 `Transcription Rust/`. It runs local Whisper and ECAPA-TDNN inference without a

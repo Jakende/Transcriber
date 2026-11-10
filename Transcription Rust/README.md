@@ -1,4 +1,9 @@
-# Transcription Rust für macOS
+# Transcription Rust für macOS — Work in progress
+
+**Die Rust-Version ist noch Work in progress und noch nicht vollständig
+funktionsfähig. Vollständig funktionsfähig sind die bisherigen macOS-
+(Swift/Python) und Windows-Anwendungen. Für den täglichen Einsatz die stabilen
+Releases verwenden.**
 
 Eigenständige Rust-Neufassung der macOS-Anwendung. Oberfläche, Whisper-Inferenz,
 ECAPA-TDNN-Sprecherinferenz, Audiodekodierung, Resampling, Bearbeitung, Speicherung
