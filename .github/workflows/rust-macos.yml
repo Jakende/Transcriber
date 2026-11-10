@@ -1,0 +1,35 @@
+name: Rust macOS
+on:
+  push:
+    branches: [main, 'codex/rust-*']
+    paths: ['Transcription Rust/**', '.github/workflows/rust-macos.yml']
+  pull_request:
+    paths: ['Transcription Rust/**', '.github/workflows/rust-macos.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rust-macos:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: Transcription Rust
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust
+        run: rustup show active-toolchain
+      - name: Check formatting
+        run: cargo fmt --all --check
+      - name: Test Rust application
+        run: cargo test --locked --all-targets
+      - name: Check Rust warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Build macOS application
+        run: ./scripts/build-macos.sh
+      - name: Upload signed app archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: Transcription-Rust-macOS-arm64
+          path: |
+            Transcription Rust/dist/Transcription-Rust-macOS-arm64.zip
+            Transcription Rust/dist/Transcription-Rust-macOS-arm64.zip.sha256
