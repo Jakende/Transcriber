@@ -5,6 +5,14 @@
 
 Local audio and video transcription for macOS and Windows. Transcriber combines Whisper transcription, optional speaker diarization, a transcript editor, podcast and YouTube import, and Obsidian-ready exports in native desktop apps.
 
+## Rust macOS application
+
+The independent [Rust macOS application](Transcription%20Rust/README.md) lives in
+`Transcription Rust/`. It runs local Whisper and ECAPA-TDNN inference without a
+Python or ffmpeg runtime, and automatically reuses compatible existing Whisper
+models instead of downloading duplicate weights. Its README documents supported
+formats, differences from the original apps, build commands, and model discovery.
+
 ## Download
 
 Get the current version from the [GitHub Releases page](https://github.com/Jakende/Transcriber/releases/latest).

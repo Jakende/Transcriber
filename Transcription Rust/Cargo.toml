@@ -1,0 +1,55 @@
+[package]
+name = "transcription-rust"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+description = "Local macOS transcription, written in Rust"
+license = "MIT"
+
+[features]
+default = ["metal"]
+metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
+
+[dependencies]
+anyhow = "1"
+candle-core = "=0.9.2"
+candle-nn = "=0.9.2"
+candle-transformers = "=0.9.2"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+csv = "1"
+directories = "6"
+eframe = { version = "=0.33.3", default-features = false, features = ["default_fonts", "glow", "accesskit"] }
+feed-rs = "2"
+hound = "3.5"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rfd = "0.15"
+rodio = { version = "0.21", default-features = false, features = ["playback"] }
+rubato = "0.16"
+rustfft = "6"
+rusty_ytdl = { version = "=0.7.4", default-features = false, features = ["rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha1 = "0.10"
+sha2 = "0.10"
+symphonia = { version = "=0.5.5", features = ["all"] }
+tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+whatlang = "0.16"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+strip = true
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false
