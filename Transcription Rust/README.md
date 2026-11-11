@@ -18,20 +18,25 @@ Rust-Anbindungen verwendet; die Benutzeroberfläche verwendet egui statt SwiftUI
 - Whisper Tiny, Small, Medium und Large-v3-Turbo mit Metal oder CPU.
 - Deutsch, Englisch oder automatische DE/EN-Erkennung je Audioabschnitt.
 - Lokale Sprecherinferenz mit SpeechBrain-ECAPA-TDNN-Gewichten in Candle;
-  automatische oder vorgegebene maximale Clusterzahl bis zehn.
+  Silero-Sprachaktivität, überlappende Stimmfenster, Sprecherzahlbereiche bis zehn
+  und vier Stufen der Trennungsstärke.
 - Mehrere Transkriptfenster, Segmentbearbeitung, Suche, Teilen und Verbinden,
   Zeitkorrekturen, Sprecherzuweisung, Umbenennen und Zusammenführen.
 - Audiowiedergabe, Segment- und Sprecherhörproben, Schleife und Geschwindigkeit.
 - Automatisch gespeicherte Dokumente, Rückgängig/Wiederholen und zwanzig
-  Sicherungsversionen pro Dokument.
+  Sicherungsversionen pro Dokument; beschädigte Dokumente werden aus der neuesten
+  lesbaren Sicherung geöffnet, ohne das Original beim Lesen zu überschreiben.
 - Ergebnisbibliothek mit Suche, Archiv, wiederherstellbarem App-Papierkorb und Finder.
-- Glossar als Whisper-Kontext und bestätigbare Begriffsvorschläge.
+- Glossar als Whisper-Kontext, bestätigbare Ersetzungen und lokale mehrsprachige
+  Erkennung von Personen, Organisationen und Orten mit DistilBERT.
 - VTT/SRT-Import, auch mit Stimmenmarkierungen; Import bisheriger Swift-JSON-Dokumente.
 - Markdown mit Obsidian-YAML, VTT, SRT, TXT und CSV; Markdown ist die Voreinstellung.
 - Kollisionsfreie neue Exporte; bewusst aktualisierte Exporte werden vorher gesichert.
 - Podcast-RSS, gespeicherte Feed-Adressen, PodcastIndex-Suche und Episodendownloads;
-  Podcast-Metadaten werden im Dokument und Markdown erhalten.
-- YouTube-Audiodownload in M4A, optional zusätzliche Videodatei mit Tonspur.
+  Mehrfachauswahl, Zugang im macOS-Schlüsselbund und Wiederverwendung bisheriger
+  PodcastIndex-Zugangsdaten. Podcast- und iTunes-Metadaten bleiben im Dokument und Markdown erhalten.
+- YouTube als MP3 herunterladen; optional zusätzlich ein MP4 mit Bild und Ton,
+  in Rust ohne erneute Videokodierung zusammengeführt.
 - Abbruch, Fortschritt, Aktivitätsprotokoll, Diagnoseseite und Befehlszeilenzugang.
 - Direkte Wiederverwendung vorhandener Whisper-Modelle; optionaler expliziter GGML-Import.
 
@@ -67,31 +72,37 @@ App einen Fehler und überschreibt die vorhandene Datei nicht.
 
 Diese Neufassung ist keine binärkompatible Übernahme der Python-Laufzeit:
 
-- Unterstützte Container/Codecs bestimmt Symphonia: WAV/PCM, MP3, FLAC, AAC/M4A,
-  MP4 mit unterstützter Audiospur, ALAC, Ogg/Vorbis, MKV und weitere unterstützte
-  Kombinationen. Proprietäre WMV-/WMA-Codecs sowie Opus werden nicht dekodiert.
-  Videos ohne unterstützte Audiospur melden einen Dateifehler.
-- Downloads behalten ihr Quellformat. Die App enthält keinen MP3-Encoder und
-  keinen Video-Multiplexer. Audiospuren können über die Befehlszeile als WAV
-  extrahiert werden; zusätzliche YouTube-Videos brauchen eine integrierte Tonspur.
-- YouTube wird über eine Rust-Bibliothek mit Boa verarbeitet. Änderungen und
-  Zugriffssperren von YouTube können Downloads verhindern; es gibt keinen
-  externen yt-dlp-Fallback. Ein erfolgreicher Test garantiert keine dauerhafte Erreichbarkeit.
-- Sprecher werden anhand bis zu dreisekündiger ECAPA-Stimmabdrücke pro
-  Whisper-Segment gruppiert. Die App verwendet keinen Silero-VAD. Sprecherwechsel
-  innerhalb eines Segments müssen im Editor korrigiert werden. Clusterzahlen
-  sind keine verlässliche Aussage über die tatsächliche Anzahl der Personen.
-- Die Begriffsprüfung arbeitet mit nachvollziehbaren Wortkandidaten und Häufigkeit,
-  nicht mit spaCy-Sprachmodellen. Das Glossar steuert einen begrenzten Whisper-Kontext
-  und erzwingt keine bestimmte Schreibweise.
-- Die neue Bibliothek und Warteschlange liegen getrennt von den Swift-Einstellungen.
+- Symphonia und ergänzende Rust-Decoder verarbeiten WAV/PCM, AIFF, MP3,
+  FLAC, AAC/M4A, ALAC, Ogg/Vorbis, Opus in Ogg/WebM, MP4/MOV/MKV mit
+  unterstützter Audiospur sowie AVI, FLV, MPEG-TS und MPEG-1/2-Programmströme.
+  ASF/WMA/WMV unterstützt derzeit unverschlüsselte WMA-v1/v2-Basisspuren
+  mit ein oder zwei Kanälen und fester ASF-Paketgröße; WMA Pro/Lossless und
+  beliebige ffmpeg-Sondercodecs sind nicht abgedeckt.
+- MP3-Erzeugung, YouTube-Besuchersitzung und MP4-Multiplexing laufen in Rust.
+  Der Live-Test mit Audio und Video ist erfolgreich. Zugriffssperren,
+  private/anmeldepflichtige Videos und künftige YouTube-Änderungen bleiben
+  mögliche Einschränkungen.
+- Die Sprecheranalyse verwendet Silero-VAD, überlappende 1,5-Sekunden-Fenster,
+  ECAPA und hierarchisches Cosinus-Clustering. Erkannte Wechsel teilen Text
+  an Wortgrenzen. Innerhalb eines Whisper-Satzes wird die Wortposition aus dem
+  Zeitanteil angenähert; die Zeitangaben sind keine erzwungene Wortausrichtung.
+- Die neue lokale Begriffsprüfung nutzt ein mehrsprachiges DistilBERT-Modell
+  anstelle von spaCy. Beim ersten ausdrücklichen Start werden ca. 539 MB
+  Modellgewichte geladen und per SHA-256 geprüft; anschließend funktioniert sie
+  offline. Sie erkennt Personen, Organisationen und Orte. Das ist kein Nachweis
+  identischer linguistischer Ergebnisse zur bisherigen spaCy-Pipeline.
+- Bibliothek und Warteschlange liegen getrennt von den Swift-Einstellungen.
   Vorhandene Dokumente können importiert werden. Quelldateien werden nie gelöscht.
-- Für den Export verwendet „Teilen“ den Textcursor und zunächst die zeitliche Mitte;
-  die Segmentzeiten lassen sich anschließend korrigieren.
+- „Teilen“ verwendet die nächste Wortgrenze zum Textcursor, sonst die Wortmitte;
+  der Zeitanteil entspricht dem Wortanteil. Zeiten lassen sich anschließend korrigieren.
+
+Der laufende Abgleich und offene Abnahmepunkte stehen in [PARITY.md](PARITY.md).
+Die Arbeitsabläufe sind portiert; Decoderumfang und linguistische Verfahren
+sind gegenüber der bisherigen ffmpeg-/spaCy-Laufzeit begrenzt.
 
 ## Bauen
 
-macOS 13 oder neuer, Apple Silicon, Xcode Command Line Tools und Rust 1.93.0.
+macOS 13 oder neuer, Apple Silicon, Xcode Command Line Tools und Rust 1.95.0.
 
 ```bash
 cd "Transcription Rust"
@@ -123,10 +134,11 @@ cargo run --release -- doctor
 cargo run --release -- discover-models
 cargo run --release -- download-model small --speakers
 cargo run --release -- transcribe interview.m4a aufnahme.mp4 --model small \
-  --language auto --diarize --speakers 2 --formats md,vtt,srt,txt,csv --output ./Ergebnisse
+  --language auto --diarize --speaker-range 2-4 --separation 0.60 --formats md,vtt,srt,txt,csv --output ./Ergebnisse
 cargo run --release -- transcribe interview.wav --cpu --no-timecodes --fps 25
 cargo run --release -- import untertitel.vtt --audio interview.wav --output ./Import
 cargo run --release -- extract film.mp4 tonspur.wav
+cargo run --release -- analyze-terms transkript.txt
 cargo run --release -- import-ggml ../"Transcription macOS App"/.bundle-cache/resources/models/ggml-small.bin small
 ```
 
@@ -137,8 +149,10 @@ Konfiguration und Tokenizer werden bei Bedarf von Hugging Face geladen. Die
 konvertierten Gewichte erhalten eine eigene SHA-256-Provenienz in `import.json`.
 Ein vorhandenes Modell wird nicht ersetzt.
 
-Für PodcastIndex `PODCASTINDEX_API_KEY` und `PODCASTINDEX_API_SECRET` in der
-Startumgebung setzen; Zugangsdaten werden nicht in den Einstellungen gespeichert.
+Für PodcastIndex API-Schlüssel und API-Geheimnis unter „PodcastIndex-Zugang“
+im macOS-Schlüsselbund speichern. Alternativ funktionieren `PODCASTINDEX_API_KEY`
+und `PODCASTINDEX_API_SECRET` (auch die bisherigen Namen `PODCAST_INDEX_KEY` und
+`PODCAST_INDEX_SECRET`). Zugangsdaten stehen nicht in der Einstellungsdatei.
 RSS-Feeds funktionieren ohne diese Zugangsdaten.
 
 ## Daten und Wiederherstellung

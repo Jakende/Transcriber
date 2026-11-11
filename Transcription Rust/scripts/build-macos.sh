@@ -19,7 +19,7 @@ if [[ -e "$app" ]]; then
 fi
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary" "$app/Contents/MacOS/Transcription Rust"
-cp LICENSE THIRD-PARTY-NOTICES.md README.md "$app/Contents/Resources/"
+cp LICENSE THIRD-PARTY-NOTICES.md README.md PARITY.md VALIDATION-0.2.md "$app/Contents/Resources/"
 gzip -dc THIRD-PARTY-LICENSES.html.gz > "$app/Contents/Resources/THIRD-PARTY-LICENSES.html"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -30,8 +30,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>Transcription Rust</string>
 <key>CFBundleDisplayName</key><string>Transcription Rust</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>0.2.0</string>
+<key>CFBundleVersion</key><string>2</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>

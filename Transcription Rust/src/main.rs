@@ -72,6 +72,10 @@ enum Command {
         speakers: u8,
         #[arg(long)]
         glossary: Option<PathBuf>,
+        #[arg(long, default_value="auto",value_parser=["auto","2-2","2-4","4-6","5-8","6-10"])]
+        speaker_range: String,
+        #[arg(long, default_value_t = 0.60)]
+        separation: f32,
     },
     /// VTT/SRT oder bisherige Swift-JSON-Dokumente importieren und exportieren.
     Import {
@@ -87,6 +91,12 @@ enum Command {
     Extract { file: PathBuf, output: PathBuf },
     /// Pfade, Modelle und verfügbare Rechengeräte prüfen.
     Doctor,
+    /// Personen, Organisationen und Orte lokal analysieren (einmalig ca. 539 MB Modell).
+    AnalyzeTerms {
+        file: PathBuf,
+        #[arg(long)]
+        cpu: bool,
+    },
     /// Rust-Sprecherinferenz prüfen und Stimmabdrücke als JSON ausgeben.
     SpeakerEmbedding {
         file: PathBuf,
@@ -109,6 +119,19 @@ fn main() -> Result<()> {
     let cancel = Arc::new(AtomicBool::new(false));
     let mut progress = |p: f32, message: String| eprintln!("{:3.0}% {message}", p * 100.);
     match args.command {
+        Some(Command::AnalyzeTerms { file, cpu }) => {
+            let text = std::fs::read_to_string(file)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&transcription_rust::terms::analyze(
+                    &text,
+                    cpu,
+                    &cancel,
+                    &mut progress
+                )?)?
+            );
+            Ok(())
+        }
         None => ui::run().map_err(|e| anyhow::anyhow!(e.to_string())),
         Some(Command::BundleModel { model, output }) => {
             let assets = models::resolve_model(model, &cancel, &mut progress)?;
@@ -188,6 +211,8 @@ fn main() -> Result<()> {
             diarize,
             speakers,
             glossary,
+            speaker_range,
+            separation,
         }) => {
             let glossary = glossary
                 .map(std::fs::read_to_string)
@@ -210,6 +235,8 @@ fn main() -> Result<()> {
                 fps,
                 diarization: diarize,
                 speakers: speakers as usize,
+                speaker_range,
+                separation,
                 glossary,
                 ..Default::default()
             };

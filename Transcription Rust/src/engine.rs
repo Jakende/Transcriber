@@ -87,7 +87,11 @@ impl Engine {
         let mut doc = Document::new(path, settings.model.name(), &settings.language, device);
         doc.timecodes = settings.timecodes;
         doc.fps_timecode = settings.fps;
-        let ranges = audio::chunks(&pcm);
+        let ranges = if settings.language == "auto" {
+            audio::language_chunks(&pcm, cancel)?
+        } else {
+            audio::chunks(&pcm)
+        };
         let count = ranges.len();
         for (i, (start, end)) in ranges.into_iter().enumerate() {
             check_cancel(cancel)?;
@@ -134,11 +138,21 @@ impl Engine {
                 end as f64 / audio::RATE as f64,
                 &language,
             )?;
+            let mut segments = segments;
+            if settings.language == "auto" {
+                for segment in &mut segments {
+                    if let Some(language) = crate::glossary::language(&segment.text) {
+                        segment.language = Some(language);
+                    }
+                }
+            }
             doc.segments.extend(segments);
         }
         if settings.diarization && !doc.segments.is_empty() {
             progress(0.95, "Sprecher erkennen …".into());
-            crate::speakers::assign(&pcm, &mut doc, settings.speakers, cancel, progress)?;
+            crate::speakers::assign(&pcm, &mut doc, settings, cancel, &mut |p, message| {
+                progress(0.95 + p * 0.05, message)
+            })?;
         }
         doc.validate()?;
         progress(1., format!("{} Segmente erstellt", doc.segments.len()));
