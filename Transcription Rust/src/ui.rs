@@ -75,18 +75,21 @@ struct Player {
     source: String,
     start: f64,
     end: f64,
+    looping: bool,
     samples: Arc<Vec<f32>>,
 }
 impl Player {
     fn new(samples: Vec<f32>, source: String) -> Result<Self> {
         let stream = rodio::OutputStreamBuilder::open_default_stream()?;
         let sink = rodio::Sink::connect_new(stream.mixer());
+        sink.pause();
         Ok(Self {
             _stream: stream,
             sink,
             source,
             start: 0.,
             end: 0.,
+            looping: false,
             samples: Arc::new(samples),
         })
     }
@@ -97,6 +100,7 @@ impl Player {
         self.sink.set_speed(speed);
         self.start = start;
         self.end = end;
+        self.looping = looping;
         let a = ((start * audio::RATE as f64) as usize).min(self.samples.len());
         let b = ((end * audio::RATE as f64) as usize).min(self.samples.len());
         if b <= a {
@@ -1229,7 +1233,7 @@ impl App {
             "Vorhandene Modelle erkennen, Speicherorte verwalten und den Status prüfen.",
         );
         ui.label(format!(
-            "Version {} · {}",
+            "Version {} · Work in progress · {}",
             env!("CARGO_PKG_VERSION"),
             std::env::consts::ARCH
         ));
@@ -1287,7 +1291,7 @@ impl App {
         if ui.button("Datenordner öffnen").clicked() {
             reveal(&storage::data_dir());
         }
-        ui.label("Rust: Candle + Metal/CPU · Symphonia · ECAPA-TDNN · egui · Boa");
+        ui.label("Rust: Candle + Metal/CPU · Silero · ECAPA-TDNN · Symphonia/OxideAV · egui");
         self.activity(ui);
     }
     fn save_editor(&mut self, editor: &mut Editor) -> bool {
@@ -1444,14 +1448,20 @@ impl App {
             {
                 player.sink.set_speed(editor.speed);
                 if ui
-                    .button(if player.sink.is_paused() {
+                    .button(if player.sink.empty() {
+                        "Wiedergeben"
+                    } else if player.sink.is_paused() {
                         "Weiter"
                     } else {
                         "Pause"
                     })
                     .clicked()
                 {
-                    if player.sink.is_paused() {
+                    if player.sink.empty() {
+                        if let Some(segment) = editor.doc.segments.get(editor.selected) {
+                            player.play(segment.start, segment.end, editor.speed, editor.looping);
+                        }
+                    } else if player.sink.is_paused() {
                         player.sink.play();
                     } else {
                         player.sink.pause();
@@ -1459,11 +1469,17 @@ impl App {
                 }
                 if ui.button("Stopp").clicked() {
                     player.sink.stop();
+                    player.sink.pause();
+                    player.start = 0.;
+                    player.end = 0.;
                 }
-                ui.label(document::subtitle_time(
-                    player.start + player.sink.get_pos().as_secs_f64(),
-                    '.',
-                ));
+                let elapsed = player.sink.get_pos().as_secs_f64();
+                let position = if player.looping && player.end > player.start {
+                    player.start + elapsed % (player.end - player.start)
+                } else {
+                    (player.start + elapsed).min(player.end)
+                };
+                ui.label(document::subtitle_time(position, '.'));
             }
         });
         ui.horizontal(|ui| {
@@ -1575,6 +1591,7 @@ impl App {
                     self.dirty_settings = true;
                 }
             }
+            editor.replacements.clear();
         }
         ui.separator();
         let speaker_ids = editor

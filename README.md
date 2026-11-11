@@ -16,6 +16,9 @@ The independent [Rust macOS application](Transcription%20Rust/README.md) lives i
 Python or ffmpeg runtime, and automatically reuses compatible existing Whisper
 models instead of downloading duplicate weights. Its README documents supported
 formats, differences from the original apps, build commands, and model discovery.
+The 0.2 work-in-progress port adds Silero, multilingual entity analysis, podcast
+batches, Keychain reuse, Rust MP3 encoding and YouTube MP4 muxing.
+[Workflow coverage and remaining limits](Transcription%20Rust/PARITY.md).
 
 ## Download
 

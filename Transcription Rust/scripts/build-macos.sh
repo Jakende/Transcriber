@@ -19,7 +19,7 @@ if [[ -e "$app" ]]; then
 fi
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary" "$app/Contents/MacOS/Transcription Rust"
-cp LICENSE THIRD-PARTY-NOTICES.md README.md PARITY.md "$app/Contents/Resources/"
+cp LICENSE THIRD-PARTY-NOTICES.md README.md PARITY.md VALIDATION-0.2.md "$app/Contents/Resources/"
 gzip -dc THIRD-PARTY-LICENSES.html.gz > "$app/Contents/Resources/THIRD-PARTY-LICENSES.html"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
