@@ -36,6 +36,12 @@ impl Segment {
     }
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SpeakerRegion {
+    pub start: f64,
+    pub end: f64,
+    pub speaker: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Document {
     pub id: String,
     pub source_path: PathBuf,
@@ -55,7 +61,13 @@ pub struct Document {
     pub speaker_model: Option<String>,
     #[serde(default)]
     pub speaker_names: BTreeMap<String, String>,
+    #[serde(default)]
+    pub speaker_regions: Vec<SpeakerRegion>,
+    #[serde(default)]
+    pub candidates: Vec<crate::terms::Candidate>,
     pub segments: Vec<Segment>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub outputs: BTreeMap<String, String>,
     #[serde(default)]
@@ -87,6 +99,9 @@ impl Document {
             diarization: false,
             speaker_model: None,
             speaker_names: BTreeMap::new(),
+            speaker_regions: vec![],
+            candidates: vec![],
+            extra: BTreeMap::new(),
             segments: vec![],
             outputs: BTreeMap::new(),
             podcast: None,
@@ -111,6 +126,40 @@ impl Document {
             .map(String::as_str)
             .unwrap_or(speaker)
     }
+    /// Split at a whole-word boundary, preferring the editor cursor or the word midpoint.
+    pub fn split_words(&mut self, index: usize, cursor: Option<usize>) -> Result<()> {
+        let segment = self.segments.get(index).context("Segment fehlt.")?;
+        let words = segment.text.split_whitespace().collect::<Vec<_>>();
+        ensure!(
+            words.len() >= 2,
+            "Zum Teilen sind mindestens zwei Wörter nötig."
+        );
+        let boundaries = segment
+            .text
+            .char_indices()
+            .filter(|(byte, ch)| {
+                ch.is_whitespace()
+                    && !segment.text[..*byte].trim().is_empty()
+                    && !segment.text[*byte..].trim().is_empty()
+            })
+            .map(|(byte, _)| segment.text[..byte].chars().count())
+            .collect::<Vec<_>>();
+        let target = cursor.unwrap_or_else(|| words[..words.len() / 2].join(" ").chars().count());
+        let char_index = *boundaries
+            .iter()
+            .min_by_key(|b| b.abs_diff(target))
+            .context("Keine Wortgrenze vorhanden.")?;
+        let byte = segment
+            .text
+            .char_indices()
+            .nth(char_index)
+            .map(|(b, _)| b)
+            .unwrap();
+        let left_words = segment.text[..byte].split_whitespace().count();
+        let at =
+            segment.start + (segment.end - segment.start) * left_words as f64 / words.len() as f64;
+        self.split(index, at, char_index)
+    }
     pub fn split(&mut self, index: usize, at: f64, char_index: usize) -> Result<()> {
         let s = self.segments.get(index).context("Segment fehlt.")?;
         ensure!(
@@ -123,6 +172,10 @@ impl Document {
             .nth(char_index)
             .map(|(n, _)| n)
             .unwrap_or(s.text.len());
+        ensure!(
+            !s.text[..byte].trim().is_empty() && !s.text[byte..].trim().is_empty(),
+            "Beide Teilsegmente benötigen Text."
+        );
         let mut right = s.clone();
         right.id = new_id();
         right.start = at;
@@ -141,23 +194,66 @@ impl Document {
         let next = self.segments.remove(index + 1);
         let s = &mut self.segments[index];
         s.end = s.end.max(next.end);
+        if s.speaker.is_none() {
+            s.speaker = next.speaker;
+        }
         s.text = format!("{} {}", s.text.trim(), next.text.trim());
         Ok(())
     }
     pub fn merge_speakers(&mut self, from: &str, to: &str) {
+        if from == to {
+            return;
+        }
+        let exists = |id: &str| {
+            self.speaker_names.contains_key(id)
+                || self
+                    .segments
+                    .iter()
+                    .any(|s| s.speaker.as_deref() == Some(id))
+                || self.speaker_regions.iter().any(|r| r.speaker == id)
+        };
+        if !exists(from) || !exists(to) {
+            return;
+        }
+        let target_name = self
+            .speaker_names
+            .get(to)
+            .cloned()
+            .or_else(|| self.speaker_names.get(from).cloned())
+            .unwrap_or_else(|| to.into());
+        self.speaker_names.insert(to.into(), target_name);
         for s in &mut self.segments {
             if s.speaker.as_deref() == Some(from) {
                 s.speaker = Some(to.into());
             }
         }
+        for region in &mut self.speaker_regions {
+            if region.speaker == from {
+                region.speaker = to.into();
+            }
+        }
         self.speaker_names.remove(from);
+        self.speaker_regions
+            .sort_by(|a, b| a.start.total_cmp(&b.start).then(a.end.total_cmp(&b.end)));
+        let mut merged: Vec<SpeakerRegion> = vec![];
+        for region in std::mem::take(&mut self.speaker_regions) {
+            if let Some(last) = merged.last_mut()
+                && last.speaker == region.speaker
+                && region.start <= last.end + 0.5
+            {
+                last.end = last.end.max(region.end);
+            } else {
+                merged.push(region);
+            }
+        }
+        self.speaker_regions = merged;
     }
     pub fn render(&self, format: Format) -> Result<String> {
         self.validate()?;
         let mut out = String::new();
         match format {
             Format::Markdown => {
-                let metadata = serde_json::json!({"created": self.created, "model": self.model, "device": self.device, "source_file": self.source_file, "fps_timecode": self.fps_timecode, "timecodes": self.timecodes, "language": self.language, "engine": self.engine, "diarization": self.diarization, "speaker_model": self.speaker_model, "podcast": self.podcast});
+                let metadata = serde_json::json!({"created": self.created, "model": self.model, "device": self.device, "source_file": self.source_file, "fps_timecode": self.fps_timecode, "timecodes": self.timecodes, "language": self.language, "engine": self.engine, "diarization": self.diarization, "speaker_model": self.speaker_model, "speaker_count":self.speaker_names.len(), "speakers":self.speaker_names.values().collect::<Vec<_>>(), "source_type":if self.podcast.is_some(){"podcast"}else{"file"}, "podcast": self.podcast});
                 out.push_str("---\n");
                 out.push_str(&serde_yaml::to_string(&metadata)?);
                 out.push_str("---\n\n");
@@ -191,17 +287,31 @@ impl Document {
                         subtitle_time(s.end, separator)
                     ));
                     if let Some(speaker) = &s.speaker {
-                        out.push_str(&format!("{}: ", self.speaker_label(speaker)));
+                        if format == Format::Vtt {
+                            out.push_str(&format!(
+                                "<v {}>",
+                                cue_escape(self.speaker_label(speaker))
+                            ));
+                        } else {
+                            out.push_str(&format!("{}: ", self.speaker_label(speaker)));
+                        }
                     }
                     // A blank line terminates a cue; keep edited paragraphs inside one cue.
-                    out.push_str(
-                        &s.text
-                            .replace("\r\n", "\n")
-                            .split('\n')
-                            .filter(|l| !l.trim().is_empty())
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    );
+                    let text = s
+                        .text
+                        .replace("\r\n", "\n")
+                        .split('\n')
+                        .filter(|l| !l.trim().is_empty())
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    out.push_str(&if format == Format::Vtt {
+                        cue_escape(&text)
+                    } else {
+                        text
+                    });
+                    if format == Format::Vtt && s.speaker.is_some() {
+                        out.push_str("</v>");
+                    }
                     out.push_str("\n\n");
                 }
             }
@@ -411,7 +521,11 @@ pub fn import_subtitles(text: &str, source: &Path) -> Result<Document> {
         let speaker = raw
             .strip_prefix("<v ")
             .and_then(|s| s.split_once('>'))
-            .map(|(s, _)| s.to_string());
+            .map(|(s, _)| {
+                s.replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&amp;", "&")
+            });
         let mut stripped = String::new();
         let mut in_tag = false;
         for c in raw.chars() {
@@ -442,4 +556,10 @@ pub fn import_subtitles(text: &str, source: &Path) -> Result<Document> {
     );
     doc.validate()?;
     Ok(doc)
+}
+
+fn cue_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }

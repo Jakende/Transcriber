@@ -37,6 +37,7 @@ enum Event {
     Downloaded(PathBuf),
     Discovered(Vec<transcription_rust::discovery::InstalledModel>),
     Playback(Vec<f32>, String),
+    Terms(String, Vec<transcription_rust::terms::Candidate>),
 }
 struct Editor {
     doc: Document,
@@ -47,6 +48,7 @@ struct Editor {
     last_edit: Instant,
     open: bool,
     merge_target: String,
+    replacements: BTreeMap<String, String>,
     speed: f32,
     looping: bool,
 }
@@ -61,6 +63,7 @@ impl Editor {
             last_edit: Instant::now(),
             open: true,
             merge_target: String::new(),
+            replacements: BTreeMap::new(),
             speed: 1.,
             looping: false,
         }
@@ -127,7 +130,10 @@ struct App {
     term: String,
     url: String,
     podcast_query: String,
+    podcast_key: String,
+    podcast_secret: String,
     episodes: Vec<Episode>,
+    selected_episodes: std::collections::BTreeSet<String>,
     podcasts: Vec<Podcast>,
     download_video: bool,
     auto_start: bool,
@@ -185,7 +191,10 @@ impl App {
             term: String::new(),
             url: String::new(),
             podcast_query: String::new(),
+            podcast_key: String::new(),
+            podcast_secret: String::new(),
             episodes: vec![],
+            selected_episodes: Default::default(),
             podcasts: vec![],
             download_video: false,
             auto_start: false,
@@ -309,8 +318,12 @@ impl App {
                         "Bereit"
                     }
                     .into();
-                    if self.download_ready && self.auto_start && !self.settings.queue.is_empty() {
-                        self.download_ready = false;
+                    let downloaded = std::mem::take(&mut self.download_ready);
+                    if downloaded
+                        && self.auto_start
+                        && !self.cancel.load(Ordering::Relaxed)
+                        && !self.settings.queue.is_empty()
+                    {
                         self.start(ctx);
                     }
                 }
@@ -345,10 +358,19 @@ impl App {
                     self.installed_models = models;
                 }
                 Event::Feed(v) => {
+                    self.selected_episodes.clear();
                     self.episodes = v;
                     self.podcasts.clear();
                 }
                 Event::Podcasts(v) => self.podcasts = v,
+                Event::Terms(id, candidates) => {
+                    if let Some(editor) = self.editors.values_mut().find(|e| e.doc.id == id) {
+                        editor.history.record(&editor.doc);
+                        editor.doc.candidates = candidates;
+                        editor.dirty = true;
+                        editor.last_edit = Instant::now();
+                    }
+                }
                 Event::Downloaded(p) => {
                     self.download_ready = true;
                     self.log(format!("Geladen: {}", p.display()));
@@ -389,6 +411,12 @@ impl App {
             })();
             match result {
                 Ok(mut doc) => {
+                    for segment in &mut doc.segments {
+                        if segment.language.is_none() {
+                            segment.language =
+                                transcription_rust::glossary::language(&segment.text);
+                        }
+                    }
                     doc.id = uuid::Uuid::new_v4().to_string();
                     doc.outputs.clear();
                     if let Err(e) = self.library.store(&doc) {
@@ -669,12 +697,63 @@ impl App {
                                 );
                                 if self.settings.diarization {
                                     ui.add_space(12.);
-                                    crate::design::secondary(ui, "Anzahl");
-                                    ui.add(
-                                        egui::DragValue::new(&mut self.settings.speakers)
-                                            .range(0..=10),
-                                    );
-                                    crate::design::secondary(ui, "0 = automatisch");
+                                    egui::ComboBox::from_id_salt("speaker-range")
+                                        .selected_text(if self.settings.speaker_range == "auto" {
+                                            "Automatisch"
+                                        } else {
+                                            &self.settings.speaker_range
+                                        })
+                                        .show_ui(ui, |ui| {
+                                            for (value, label) in [
+                                                ("auto", "Automatisch"),
+                                                ("2-2", "Genau 2"),
+                                                ("2-4", "2–4"),
+                                                ("4-6", "4–6"),
+                                                ("5-8", "5–8"),
+                                                ("6-10", "6–10"),
+                                            ] {
+                                                if ui
+                                                    .selectable_value(
+                                                        &mut self.settings.speaker_range,
+                                                        value.into(),
+                                                        label,
+                                                    )
+                                                    .changed()
+                                                {
+                                                    self.settings.speakers = 0;
+                                                }
+                                            }
+                                        });
+                                    let selected = [
+                                        (0.78, "Locker"),
+                                        (0.60, "Normal"),
+                                        (0.45, "Streng"),
+                                        (0.30, "Sehr streng"),
+                                    ]
+                                    .into_iter()
+                                    .min_by(|a, b| {
+                                        (a.0 - self.settings.separation)
+                                            .abs()
+                                            .total_cmp(&(b.0 - self.settings.separation).abs())
+                                    })
+                                    .unwrap()
+                                    .1;
+                                    egui::ComboBox::from_id_salt("speaker-separation")
+                                        .selected_text(selected)
+                                        .show_ui(ui, |ui| {
+                                            for (value, label) in [
+                                                (0.78, "Locker"),
+                                                (0.60, "Normal"),
+                                                (0.45, "Streng"),
+                                                (0.30, "Sehr streng"),
+                                            ] {
+                                                ui.selectable_value(
+                                                    &mut self.settings.separation,
+                                                    value,
+                                                    label,
+                                                );
+                                            }
+                                        });
                                 }
                             });
                             egui::CollapsingHeader::new("Weitere Einstellungen").show(ui, |ui| {
@@ -853,8 +932,14 @@ impl App {
             });
     }
     fn open_editor(&mut self, path: &Path) {
-        match storage::load::<Document>(path) {
-            Ok(doc) => {
+        match self.library.read_document(path) {
+            Ok((doc, recovered)) => {
+                if let Some(backup) = recovered {
+                    self.log(format!(
+                        "Dokument aus Sicherung wiederhergestellt: {}",
+                        backup.display()
+                    ));
+                }
                 if let Some(editor) = self.editors.get_mut(&doc.id) {
                     editor.open = true;
                 } else {
@@ -1007,7 +1092,7 @@ impl App {
                 "Nach Download Warteschlange transkribieren",
             );
         });
-        ui.small("Downloads behalten ihr Audioformat (M4A/WebM/MP3). YouTube kann automatisierte Zugriffe blockieren.");
+        ui.small("YouTube-Audio wird als MP3 gespeichert. Die zusätzliche MP4-Datei enthält Bild und Ton.");
         egui::ComboBox::from_id_salt("saved-feeds")
             .selected_text("Gespeicherte RSS-Feeds")
             .show_ui(ui, |ui| {
@@ -1031,6 +1116,12 @@ impl App {
                 });
             }
         });
+        egui::CollapsingHeader::new("PodcastIndex-Zugang").show(ui,|ui|{
+            ui.label("Vorhandene Zugangsdaten der macOS-App werden automatisch gelesen. Neue Daten werden im Schlüsselbund gespeichert.");
+            ui.label("API-Schlüssel");ui.add(egui::TextEdit::singleline(&mut self.podcast_key).password(true));
+            ui.label("API-Geheimnis");ui.add(egui::TextEdit::singleline(&mut self.podcast_secret).password(true));
+            if ui.button("Im Schlüsselbund speichern").clicked(){match transcription_rust::credentials::save(&self.podcast_key,&self.podcast_secret){Ok(())=>{self.podcast_key.clear();self.podcast_secret.clear();self.log("PodcastIndex-Zugang im Schlüsselbund gespeichert.");},Err(e)=>self.log(e.to_string())}}
+        });
         let podcasts = self.podcasts.clone();
         for podcast in podcasts {
             if ui
@@ -1045,12 +1136,67 @@ impl App {
                 });
             }
         }
+        if ui
+            .add_enabled(
+                !self.busy && !self.selected_episodes.is_empty(),
+                egui::Button::new(format!(
+                    "{} ausgewählte Folgen laden",
+                    self.selected_episodes.len()
+                )),
+            )
+            .clicked()
+        {
+            let episodes = self
+                .episodes
+                .iter()
+                .filter(|e| self.selected_episodes.contains(&e.audio_url))
+                .cloned()
+                .collect::<Vec<_>>();
+            self.task(ctx, move |tx, cancel| {
+                let count = episodes.len();
+                for (i, episode) in episodes.iter().enumerate() {
+                    audio::check_cancel(&cancel)?;
+                    match media::download_episode(
+                        episode,
+                        &media::downloads_dir(),
+                        &cancel,
+                        &mut |p| {
+                            let _ = tx.send(Event::Progress(
+                                (i as f32 + p) / count as f32,
+                                format!("Folge {}/{} laden", i + 1, count),
+                            ));
+                        },
+                    ) {
+                        Ok(path) => {
+                            tx.send(Event::Downloaded(path))?;
+                        }
+                        Err(e) => {
+                            tx.send(Event::Log(format!("{}: {e:#}", episode.title)))?;
+                        }
+                    }
+                }
+                Ok(())
+            });
+        }
         let episodes = self.episodes.clone();
         egui::ScrollArea::vertical()
             .max_height(400.)
             .show(ui, |ui| {
                 for episode in episodes {
                     ui.horizontal(|ui| {
+                        let mut selected = self.selected_episodes.contains(&episode.audio_url);
+                        if ui
+                            .add_enabled(!self.busy, egui::Checkbox::without_text(&mut selected))
+                            .on_hover_text("Folge auswählen")
+                            .changed()
+                        {
+                            if selected {
+                                self.selected_episodes.insert(episode.audio_url.clone());
+                            } else {
+                                self.selected_episodes.remove(&episode.audio_url);
+                            }
+                        }
+
                         if ui
                             .add_enabled(!self.busy, egui::Button::new("Laden"))
                             .clicked()
@@ -1328,9 +1474,11 @@ impl App {
         egui::CollapsingHeader::new("Sprecher benennen und zusammenführen").show(ui, |ui| {
             let ids = editor
                 .doc
-                .segments
-                .iter()
-                .filter_map(|s| s.speaker.clone())
+                .speaker_names
+                .keys()
+                .cloned()
+                .chain(editor.doc.speaker_regions.iter().map(|r| r.speaker.clone()))
+                .chain(editor.doc.segments.iter().filter_map(|s| s.speaker.clone()))
                 .collect::<std::collections::BTreeSet<_>>();
             for id in &ids {
                 ui.horizontal(|ui| {
@@ -1383,12 +1531,26 @@ impl App {
             }
         });
         egui::CollapsingHeader::new("Begriffsvorschläge").show(ui, |ui| {
-            for (term, count) in engine::term_candidates(&editor.doc, &self.settings.glossary)
-                .into_iter()
-                .take(20)
-            {
+            ui.label("Personen, Organisationen und Orte lokal erkennen. Das Sprachmodell benötigt beim ersten Mal etwa 539 MB; danach arbeitet die Analyse offline.");
+            if ui.add_enabled(!self.busy,egui::Button::new("Sprachanalyse starten")).clicked() {
+                let id=editor.doc.id.clone();
+                let text=editor.doc.segments.iter().map(|s|s.text.as_str()).collect::<Vec<_>>().join("\n");
+                let cpu=self.settings.cpu;
+                self.task(ctx,move |tx,cancel| {
+                    let candidates=transcription_rust::terms::analyze(&text,cpu,&cancel,&mut |p,m|{let _=tx.send(Event::Progress(p,m));})?;
+                    tx.send(Event::Terms(id,candidates))?;Ok(())
+                });
+            }
+            let candidates=if editor.doc.candidates.is_empty() {engine::term_candidates(&editor.doc,&self.settings.glossary)} else {editor.doc.candidates.iter().filter(|c|!self.settings.glossary.iter().any(|g|g.to_lowercase()==c.term.to_lowercase())).map(|c|(c.term.clone(),c.count)).collect()};
+            for (term,count) in candidates.into_iter().take(100) {
                 ui.horizontal(|ui| {
                     ui.label(format!("{term} ({count})"));
+                    ui.add(
+                        egui::TextEdit::singleline(
+                            editor.replacements.entry(term.clone()).or_default(),
+                        )
+                        .hint_text("Korrekte Schreibweise"),
+                    );
                     if ui.small_button("Ins Glossar").clicked() {
                         self.settings.glossary.push(term.clone());
                         self.dirty_settings = true;
@@ -1396,7 +1558,34 @@ impl App {
                 });
             }
         });
+        if editor.replacements.values().any(|v| !v.trim().is_empty())
+            && ui.button("Bestätigte Korrekturen anwenden").clicked()
+        {
+            for segment in &mut editor.doc.segments {
+                segment.text =
+                    transcription_rust::glossary::apply(&segment.text, &editor.replacements);
+            }
+            for term in editor
+                .replacements
+                .values()
+                .filter(|v| !v.trim().is_empty())
+            {
+                if !self.settings.glossary.contains(term) {
+                    self.settings.glossary.push(term.clone());
+                    self.dirty_settings = true;
+                }
+            }
+        }
         ui.separator();
+        let speaker_ids = editor
+            .doc
+            .speaker_names
+            .keys()
+            .cloned()
+            .chain(editor.doc.speaker_regions.iter().map(|r| r.speaker.clone()))
+            .chain(editor.doc.segments.iter().filter_map(|s| s.speaker.clone()))
+            .chain((1..=10).map(|i| format!("SPEAKER_{i:02}")))
+            .collect::<std::collections::BTreeSet<_>>();
         let mut split = None;
         let mut merge = None;
         let mut delete = None;
@@ -1451,8 +1640,7 @@ impl App {
                                         None,
                                         "Ohne Sprecher",
                                     );
-                                    for i in 1..=10 {
-                                        let id = format!("SPEAKER_{i:02}");
+                                    for id in &speaker_ids {
                                         ui.selectable_value(
                                             &mut segment.speaker,
                                             Some(id.clone()),
@@ -1494,13 +1682,11 @@ impl App {
                         }
                         ui.horizontal(|ui| {
                             if ui.small_button("Teilen").clicked() {
-                                let char_index = text
+                                let cursor = text
                                     .cursor_range
                                     .map(|r| r.primary.index)
-                                    .filter(|n| *n > 0 && *n < segment.text.chars().count())
-                                    .unwrap_or_else(|| segment.text.chars().count() / 2);
-                                let at = (segment.start + segment.end) / 2.;
-                                split = Some((index, at, char_index));
+                                    .filter(|n| *n > 0 && *n < segment.text.chars().count());
+                                split = Some((index, cursor));
                             }
                             if ui.small_button("Mit nächstem verbinden").clicked() {
                                 merge = Some(index);
@@ -1513,8 +1699,8 @@ impl App {
                     });
                 }
             });
-        if let Some((index, at, cursor)) = split
-            && let Err(e) = editor.doc.split(index, at, cursor)
+        if let Some((index, cursor)) = split
+            && let Err(e) = editor.doc.split_words(index, cursor)
         {
             self.log(e.to_string());
         }

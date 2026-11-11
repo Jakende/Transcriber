@@ -71,7 +71,7 @@ pub fn client() -> Result<reqwest::blocking::Client> {
     Ok(reqwest::blocking::Client::builder()
         .user_agent(concat!("TranscriptionRust/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(20))
-        .timeout(Duration::from_secs(3600))
+        .timeout(Duration::from_secs(60))
         .build()?)
 }
 #[derive(Clone, Debug)]
@@ -207,7 +207,7 @@ pub fn verify_model(size: ModelSize, dir: &Path, cancel: &AtomicBool) -> Result<
     Ok(())
 }
 pub fn download(
-    http: &reqwest::blocking::Client,
+    _http: &reqwest::blocking::Client,
     url: &str,
     path: &Path,
     cancel: &AtomicBool,
@@ -239,43 +239,36 @@ pub fn download(
     );
     // The OS releases the advisory lock even after a crash. Rename publishes only complete files.
     let part = path.with_extension(format!("{}.part", uuid::Uuid::new_v4()));
-    let result = (|| -> Result<()> {
-        let mut response = http
-            .get(url)
-            .send()
-            .with_context(|| format!("Download fehlgeschlagen: {url}"))?
-            .error_for_status()?;
-        let length = response.content_length();
-        let mut count = 0u64;
-        let mut file = fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&part)?;
-        let mut buf = vec![0; 256 * 1024];
-        let mut last = std::time::Instant::now();
+    check_cancel(cancel)?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let result=runtime.block_on(async {
+        let client=reqwest::Client::builder().user_agent(concat!("TranscriptionRust/",env!("CARGO_PKG_VERSION"))).connect_timeout(Duration::from_secs(20)).read_timeout(Duration::from_secs(30)).timeout(Duration::from_secs(3600)).build()?;
+        let mut response=tokio::select! {
+            response=client.get(url).send()=>response.context("Download konnte nicht gestartet werden.")?.error_for_status()?,
+            ()=wait_cancel(cancel)=>anyhow::bail!("Abgebrochen"),
+        };
+        let length=response.content_length();let mut count=0u64;
+        let mut file=fs::OpenOptions::new().create_new(true).write(true).open(&part)?;
+        let mut last=std::time::Instant::now();
         loop {
-            check_cancel(cancel)?;
-            let n = response.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            file.write_all(&buf[..n])?;
-            count += n as u64;
-            if last.elapsed() > Duration::from_millis(150) {
-                progress(length.map_or(0., |len| count as f32 / len.max(1) as f32));
-                last = std::time::Instant::now();
-            }
+            let chunk=tokio::select! {
+                chunk=response.chunk()=>chunk?,
+                ()=wait_cancel(cancel)=>anyhow::bail!("Abgebrochen"),
+            };
+            let Some(chunk)=chunk else{break;};
+            file.write_all(&chunk)?;count+=chunk.len() as u64;
+            if last.elapsed()>Duration::from_millis(150){progress(length.map_or(0.,|len|count as f32/len.max(1) as f32));last=std::time::Instant::now();}
         }
-        ensure!(
-            count > 0 && length.is_none_or(|len| count == len),
-            "Unvollständiger Download."
-        );
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&part, path)?;
-        progress(1.);
-        Ok(())
-    })();
+        check_cancel(cancel)?;
+        ensure!(count>0&&length.is_none_or(|len|count==len),"Unvollständiger Download.");
+        file.sync_all()?;drop(file);
+        // Reserve without replacing a file created by another application during download.
+        let reservation=fs::OpenOptions::new().create_new(true).write(true).open(path)?;drop(reservation);
+        if let Err(error)=fs::rename(&part,path){let _=fs::remove_file(path);return Err(error.into());}
+        progress(1.);Ok(())
+    });
     let _ = fs::remove_file(part);
     result
 }
@@ -293,4 +286,10 @@ pub fn file_hash(path: &Path, cancel: &AtomicBool) -> Result<String> {
         hasher.update(&buf[..n]);
     }
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+pub async fn wait_cancel(cancel: &AtomicBool) {
+    while !cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(40)).await;
+    }
 }

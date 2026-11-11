@@ -4,7 +4,7 @@ use crate::{
     document::Document,
     models,
 };
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use candle_core::{DType, Device, Module, ModuleT, Tensor};
 use candle_nn::{BatchNorm, Conv1d, Conv1dConfig, VarBuilder};
 use sha2::{Digest, Sha256};
@@ -293,104 +293,219 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(a, b)| a * b).sum()
 }
 pub fn cluster(vectors: &[Vec<f32>], requested: usize) -> Vec<usize> {
-    if vectors.is_empty() {
+    cluster_bounded(vectors, requested, requested, 0.6, &AtomicBool::new(false)).unwrap_or_default()
+}
+/// Average-linkage cosine clustering with the previous app's distance threshold.
+pub fn cluster_bounded(
+    vectors: &[Vec<f32>],
+    minimum: usize,
+    maximum: usize,
+    separation: f32,
+    cancel: &AtomicBool,
+) -> Result<Vec<usize>> {
+    let n = vectors.len();
+    if n == 0 {
+        return Ok(vec![]);
+    }
+    anyhow::ensure!(
+        n <= 16000,
+        "Zu viele Stimmfenster für die Sprecheranalyse. Bitte Aufnahme aufteilen."
+    );
+    let normalized = vectors.iter().cloned().map(normalize).collect::<Vec<_>>();
+    let mut distances = Vec::with_capacity(n * (n - 1) / 2);
+    for i in 0..n {
+        check_cancel(cancel)?;
+        for j in i + 1..n {
+            distances.push(1. - cosine(&normalized[i], &normalized[j]).clamp(0., 1.));
+        }
+    }
+    let dendrogram = kodama::linkage(&mut distances, n, kodama::Method::Average);
+    check_cancel(cancel)?;
+    let cutoff = 0.5 + separation.clamp(0., 0.85) * 0.55;
+    let automatic = n - dendrogram
+        .steps()
+        .iter()
+        .take_while(|s| s.dissimilarity < cutoff)
+        .count();
+    let lo = minimum.max(1).min(n);
+    let hi = if maximum == 0 {
+        n
+    } else {
+        maximum.max(lo).min(n)
+    };
+    let count = automatic.clamp(lo, hi);
+    let mut parent = (0..2 * n - 1).collect::<Vec<_>>();
+    for (i, step) in dendrogram.steps().iter().take(n - count).enumerate() {
+        parent[step.cluster1] = n + i;
+        parent[step.cluster2] = n + i;
+    }
+    let mut order = vec![];
+    Ok((0..n)
+        .map(|mut i| {
+            while parent[i] != i {
+                i = parent[i];
+            }
+            if !order.contains(&i) {
+                order.push(i);
+            }
+            order.iter().position(|v| *v == i).unwrap()
+        })
+        .collect())
+}
+pub fn speaker_bounds(range: &str, legacy: usize) -> Result<(usize, usize)> {
+    if range == "auto" {
+        return Ok((legacy, legacy));
+    }
+    let (lo, hi) = range
+        .split_once('-')
+        .ok_or_else(|| anyhow::anyhow!("Ungültiger Sprecherbereich"))?;
+    let (lo, hi) = (lo.parse::<usize>()?, hi.parse::<usize>()?);
+    anyhow::ensure!(lo > 0 && lo <= hi && hi <= 10, "Ungültiger Sprecherbereich");
+    Ok((lo, hi))
+}
+pub fn speech_windows(start: usize, end: usize) -> Vec<(usize, usize)> {
+    let size = RATE as usize * 3 / 2;
+    if end - start < RATE as usize * 2 / 5 {
         return vec![];
     }
-    let mut centers = vec![vectors[0].clone()];
-    let k = requested.clamp(1, 10).min(vectors.len());
-    if requested > 0 {
-        while centers.len() < k {
-            let candidate = vectors
-                .iter()
-                .max_by(|a, b| {
-                    let similarity =
-                        |v: &Vec<f32>| centers.iter().map(|c| cosine(v, c)).fold(-1., f32::max);
-                    similarity(b).total_cmp(&similarity(a))
-                })
-                .unwrap();
-            centers.push(candidate.clone());
-        }
-    } else {
-        for vector in vectors.iter().skip(1) {
-            let score = centers
-                .iter()
-                .map(|c| cosine(vector, c))
-                .fold(-1., f32::max);
-            if score < 0.65 && centers.len() < 10 {
-                centers.push(vector.clone());
-            }
-        }
+    if end - start <= size {
+        return vec![(start, end)];
     }
-    let mut labels = vec![0; vectors.len()];
-    for _ in 0..12 {
-        for (i, v) in vectors.iter().enumerate() {
-            labels[i] = centers
-                .iter()
-                .enumerate()
-                .max_by(|a, b| cosine(v, a.1).total_cmp(&cosine(v, b.1)))
-                .unwrap()
-                .0;
-        }
-        let mut sums = vec![vec![0.; vectors[0].len()]; centers.len()];
-        let mut counts = vec![0; centers.len()];
-        for (v, &label) in vectors.iter().zip(&labels) {
-            counts[label] += 1;
-            for (sum, value) in sums[label].iter_mut().zip(v) {
-                *sum += value;
-            }
-        }
-        for i in 0..centers.len() {
-            if counts[i] > 0 {
-                centers[i] = normalize(sums[i].clone());
-            }
-        }
+    let mut out = vec![];
+    let mut at = start;
+    while at + size <= end {
+        out.push((at, at + size));
+        at += RATE as usize * 3 / 4;
     }
-    // Stable labels in order of first appearance.
-    let mut order = vec![];
-    labels
-        .into_iter()
-        .map(|label| {
-            if !order.contains(&label) {
-                order.push(label);
-            }
-            order.iter().position(|v| *v == label).unwrap()
-        })
-        .collect()
+    if out
+        .last()
+        .is_some_and(|(_, until)| *until + RATE as usize * 15 / 100 < end)
+    {
+        out.push((end - size, end));
+    }
+    out
 }
 pub fn assign(
     pcm: &[f32],
     doc: &mut Document,
-    requested: usize,
+    settings: &crate::storage::Settings,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f32, String),
 ) -> Result<()> {
     let engine = SpeakerEngine::load(doc.device == "cpu", cancel, progress)?;
-    let mut vectors = vec![];
-    for (i, segment) in doc.segments.iter().enumerate() {
+    let speech = crate::vad::speech_regions(pcm, cancel)?;
+    let mut windows = vec![];
+    let mut region_indexes = vec![];
+    for (i, &(start, end)) in speech.iter().enumerate() {
+        for window in speech_windows(start, end) {
+            windows.push(window);
+            region_indexes.push(i);
+        }
+    }
+    if windows.is_empty() {
+        return Ok(());
+    }
+    let mut vectors = Vec::with_capacity(windows.len());
+    for (i, &(start, end)) in windows.iter().enumerate() {
         check_cancel(cancel)?;
-        let start = (segment.start * RATE as f64) as usize;
-        let end = ((segment.end * RATE as f64) as usize)
-            .min(pcm.len())
-            .min(start + RATE as usize * 3);
-        let sample = pcm
-            .get(start..end)
-            .filter(|s| !s.is_empty())
-            .context("Segment liegt außerhalb der Audiodatei.")?;
-        vectors.push(engine.embedding(sample)?);
+        vectors.push(engine.embedding(&pcm[start..end])?);
         progress(
-            i as f32 / doc.segments.len() as f32,
-            format!("Stimmabdruck {}/{}", i + 1, doc.segments.len()),
+            i as f32 / windows.len() as f32,
+            format!("Stimmabdruck {}/{}", i + 1, windows.len()),
         );
     }
-    for (segment, label) in doc.segments.iter_mut().zip(cluster(&vectors, requested)) {
+    let (minimum, maximum) = speaker_bounds(&settings.speaker_range, settings.speakers)?;
+    let labels = cluster_bounded(&vectors, minimum, maximum, settings.separation, cancel)?;
+    let mut votes = vec![std::collections::BTreeMap::<usize, usize>::new(); speech.len()];
+    for (index, label) in region_indexes.into_iter().zip(labels) {
+        *votes[index].entry(label).or_default() += 1;
+    }
+    doc.speaker_regions.clear();
+    for ((start, end), votes) in speech.into_iter().zip(votes) {
+        let Some((label, _)) = votes
+            .into_iter()
+            .max_by_key(|&(label, count)| (count, std::cmp::Reverse(label)))
+        else {
+            continue;
+        };
         let id = format!("SPEAKER_{:02}", label + 1);
-        segment.speaker = Some(id.clone());
         doc.speaker_names
-            .entry(id)
+            .entry(id.clone())
             .or_insert_with(|| format!("Sprecher {}", label + 1));
+        let region = crate::document::SpeakerRegion {
+            start: start as f64 / RATE as f64,
+            end: end as f64 / RATE as f64,
+            speaker: id,
+        };
+        if let Some(last) = doc.speaker_regions.last_mut()
+            && last.speaker == region.speaker
+            && region.start <= last.end + 0.5
+        {
+            last.end = region.end;
+        } else {
+            doc.speaker_regions.push(region);
+        }
+    }
+    split_at_speaker_changes(doc)?;
+    for segment in &mut doc.segments {
+        let mut overlap = std::collections::BTreeMap::<String, f64>::new();
+        for region in &doc.speaker_regions {
+            let duration = (region.end.min(segment.end) - region.start.max(segment.start)).max(0.);
+            *overlap.entry(region.speaker.clone()).or_default() += duration;
+        }
+        segment.speaker = overlap
+            .into_iter()
+            .filter(|(_, duration)| *duration > 0.)
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(speaker, _)| speaker);
     }
     doc.diarization = true;
     doc.speaker_model = Some("speechbrain/ecapa-tdnn · candle-rust".into());
+    Ok(())
+}
+
+/// Whisper exposes phrase timestamps; split text only at whole words near a detected voice change.
+pub fn split_at_speaker_changes(doc: &mut Document) -> Result<()> {
+    for index in (0..doc.segments.len()).rev() {
+        let segment = &doc.segments[index];
+        let words = segment
+            .text
+            .char_indices()
+            .filter(|&(i, c)| {
+                !c.is_whitespace()
+                    && (i == 0
+                        || segment.text[..i]
+                            .chars()
+                            .next_back()
+                            .is_some_and(char::is_whitespace))
+            })
+            .map(|(i, _)| segment.text[..i].chars().count())
+            .collect::<Vec<_>>();
+        if words.len() < 2 || segment.end <= segment.start {
+            continue;
+        }
+        let regions = doc
+            .speaker_regions
+            .iter()
+            .filter(|r| r.end > segment.start && r.start < segment.end)
+            .collect::<Vec<_>>();
+        let mut cuts = vec![];
+        for pair in regions.windows(2) {
+            let at = (pair[0].end + pair[1].start) / 2.;
+            if pair[0].speaker == pair[1].speaker || at <= segment.start || at >= segment.end {
+                continue;
+            }
+            let word = (((at - segment.start) / (segment.end - segment.start) * words.len() as f64)
+                .round() as usize)
+                .clamp(1, words.len() - 1);
+            if cuts.last().is_none_or(|&(_, cursor)| cursor != words[word]) {
+                cuts.push((at, words[word]));
+            }
+        }
+        for (at, cursor) in cuts.into_iter().rev() {
+            doc.split(index, at, cursor)?;
+        }
+    }
     Ok(())
 }
 
